@@ -1,0 +1,76 @@
+name: Bounded work item
+description: A single independently reviewable phase or implementation outcome.
+title: "[Work] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form is a readiness aid, not an approval. The lead prepares the context.
+        Record approval of the actual revision separately. Do not update the approved
+        scope body during execution; use progress comments and a reviewed amendment.
+        Never paste credentials, resolved environments, or authenticated URLs into this form.
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Phase
+      options:
+        - Research
+        - Architecture
+        - Specification
+        - Test design
+        - Implementation
+        - Recovery
+        - Process change
+        - Project adoption
+        - Environment enablement
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome and boundaries
+      description: Observable result, non-goals, risk, allowed files/actions and remote/CMS targets, and decisions reserved for the operator. Credential access alone is not action approval.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Fresh-agent context packet
+      description: Full base commit, governing policy revision, relevant files/symbols and why, accepted decisions, dependencies, domain terms, invariants, and verified sources. No reliance on chat history.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance and demonstration
+      description: Named cases, inputs, expected outputs, negative cases, and the observable scenario. For GUI work include accepted intent/reference, states/viewports, real user actions, inspected rendered images and integrated evidence; identify only genuine unresolved design holds.
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification and environment
+      description: Approved environment-contract/profile revision, source/runtime mapping, mandatory gates including real-lab tests, actual commands, fixtures/services, shared-resource reservation, preview access/hold and evidence. Distinguish live development from frozen acceptance. Select approved secret-profile aliases and consumers by reference only; record external write isolation/recovery where relevant. For planning phases specify review criteria; for enablement prove real app access.
+    validations:
+      required: true
+  - type: textarea
+    id: documentation
+    attributes:
+      label: Documentation impact
+      description: Audience and reader need, Diataxis category for user/developer material, authoritative pages including environment setup, ADR/process impact, and actual example verification. Reuse maintained pages or explain not applicable; distinguish proposed from implemented behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: completion
+    attributes:
+      label: Completion authority and exceptions
+      description: Lead selects adopted routine-integrate policy with exact repo/target and push/PR, verified merge, post-merge gates, record update/closure authority, or names a specific operator hold. Audit production/release effects. No additional human merge approval for routine scope. Stop before next ticket; releases/deployments remain separate.
+    validations:
+      required: true
+  - type: textarea
+    id: lifecycle
+    attributes:
+      label: Lifecycle and stop conditions
+      description: Assignment/run identity; retry and helper budgets; handoff requirements; blockers; approval boundaries; existing consumed budget for recovery. No budget reset on replacement. Preserve one-account GitHub operation; model findings are not human acceptance or a required second-account approval.
+    validations:
+      required: true
