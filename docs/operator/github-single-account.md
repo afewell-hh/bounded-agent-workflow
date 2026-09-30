@@ -1,7 +1,9 @@
 # GitHub with one account: finish the ticket, then stop
 
-**Status:** proposed operating policy, adopted explicitly per repository. No setting,
-merge automation, release guard, or executable is installed by this seed. The operator
+**Status:** adopted for this repository's bounded manual bootstrap under
+[decision D1](https://github.com/afewell-hh/bounded-agent-workflow/issues/2#issuecomment-5907403557),
+which records operator-delegated authority and its source. Adoption elsewhere remains
+explicit. No setting, merge automation, release guard, or executable is installed by this seed. The operator
 and authorized agents may share one GitHub identity. A second approving account is not
 required. Retain independent cross-model review and every mandatory verification gate.
 
@@ -34,6 +36,46 @@ checkpoint. A single response such as "proceed with the proposed next ticket" ma
 that identified next scope; it is not retroactive technical approval of the prior commit.
 No response means no next-ticket implementation. The lead may summarize/prepare the next
 proposal, not launch its research, implementation, or helpers without that scope's authority.
+
+## Record operator authority with one account
+
+Operator instructions, agent-selected choices, model review, and observed results are
+different records even when all GitHub actions use the same account. Every agent-posted
+issue body, comment, review finding, or receipt begins with
+`AGENT | role | generation | native-session`. Use `unavailable` when a native session
+identifier is not exposed; a PID is an observation, not that identifier.
+
+Reserve the `OPERATOR DECISION` form for the operator. Agents never post that form or
+claim that their GitHub comment was written by the operator. The operator may instead
+approve a bounded scope or expressly delegate bounded choices in the active native
+conversation. In that case an agent posts an attributed receipt, retaining:
+
+- The exact relevant operator instruction and an original message/event reference,
+  timestamp and native session identifier where available. Preserve only a minimal
+  nonsecret excerpt privately; do not copy a full conversation or imply local evidence
+  is remotely available.
+- The exact issue/scope revision and source-policy revision; selected completion mode,
+  target, budget, exceptions and expiry; and which choices were delegated to the agent.
+- Separate observations, unresolved facts, model recommendations and agent-selected
+  decisions. Delegated judgment cannot establish an unknown process owner or prove
+  that an external consumer is absent.
+
+A receiving lead reconciles the original source, receipt and current records. An agent
+paraphrase, another model's review, an unlabelled comment or a matching GitHub username
+alone does not establish human authority. Missing or conflicting source evidence blocks
+the affected transition. These conventions and same-user source records are procedural;
+they are not tamper-proof authentication or a new permission boundary.
+
+Freeze an approved scope body. Record its creation/last-edit state and content identity
+with the decision; use progress comments afterward. A later body edit requires scope
+reconciliation and any material amendment needs authority. The coordination index links
+the original records instead of reproducing an approval as if it were a new one.
+
+Keep temporary protection exceptions and their precise expiry in GitHub decision records,
+not this maintained policy. Expiry blocks affected work and cannot be extended by agent
+replacement. Independent review, required verification and the next-ticket stop remain
+required. Routine merge authority follows the approved scope across replacement; it is
+not renewed merely because the lead changes.
 
 ## Decide exceptional checkpoints before execution
 

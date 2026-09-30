@@ -65,7 +65,10 @@ without another GitHub account; it is not part of this seed or first read-only s
 - [ADR 0002: durable state and replacement](decisions/0002-durable-state-and-replacement.md)
 - [ADR 0003: documentation authority](decisions/0003-documentation-authority.md)
 
-All three are initially Proposed. Accepted design does not imply implementation.
+All three are Accepted under the operator's delegated
+[bootstrap decision](https://github.com/afewell-hh/bounded-agent-workflow/issues/2#issuecomment-5907403557).
+Accepted design does not imply implementation; the remaining interface and runtime
+details below still require their own specifications and decisions.
 
 ## Quality scenarios
 

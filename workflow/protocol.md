@@ -4,6 +4,12 @@
 later. The procedure is adopted only within the scope the operator authorizes. A
 future executable must enforce its specified checks; prose alone is not enforcement.
 
+This repository adopted the seed baseline at `10425c4` for bounded manual bootstrap
+under [decision D1](https://github.com/afewell-hh/bounded-agent-workflow/issues/2#issuecomment-5907403557).
+Use [the single-account authority-recording convention](../docs/operator/github-single-account.md#record-operator-authority-with-one-account)
+to distinguish original operator instructions, delegated choices, model findings and
+verified observations. Adoption does not establish implemented enforcement.
+
 ## Authority and durable state
 
 Git records code and versioned product/architecture/process documents. GitHub issues

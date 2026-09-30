@@ -1,6 +1,8 @@
 # ADR 0002 — roles survive; native agent sessions are replaceable
 
-Status: **Proposed**. Adoption requires an operator-reviewed decision record.
+Status: **Accepted** on 30 September 2026 under the operator's delegated bootstrap
+authority, recorded in [decision D1](https://github.com/afewell-hh/bounded-agent-workflow/issues/2#issuecomment-5907403557).
+This is design adoption; no controller is implemented.
 
 ## Context
 
@@ -8,7 +10,7 @@ A lead may coordinate several tickets but eventually needs replacement or may di
 Native compaction, resume, fork, and subagent lifecycle differ across clients/versions.
 Session continuity must not be required to preserve approved scope or prevent retries.
 
-## Proposed decision
+## Decision
 
 Store authoritative scope, approvals, budgets, candidates, evidence, and role assignment
 generations outside conversations. Maintain a small GitHub coordination index linking
@@ -27,11 +29,13 @@ promised. Same-account session checks remain procedural without stronger isolati
 
 ## Provenance and implementation
 
-Proposal prepared on 29 September 2026. Link the actual approval and implementation.
+Proposal prepared on 29 September 2026. The substantive decision was adopted as written
+in seed revision `10425c4`; decision D1 records the original instruction source and the
+lead's delegated choices. Implementation remains future work.
 See the maintained [lifecycle procedure](../../operator/agent-lifecycle.md).
 
 Takeover reconciles recent commits, staged/unstaged/untracked
 work, and runtime/resource ownership. Agent, workspace, and environment lifetimes are
 distinct. Saved-but-uncommitted changes and a still-running remote job are not erased
-by losing a session. See the lifecycle and execution-environment contracts. This remains
-Proposed pending adoption; it does not assert implemented recovery or fencing.
+by losing a session. See the lifecycle and execution-environment contracts. Adoption
+does not assert implemented recovery or fencing.
