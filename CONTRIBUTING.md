@@ -18,8 +18,10 @@ scope and completion policy; routine scope approval includes verified merge and 
 Follow [the closeout policy](docs/operator/github-single-account.md), then stop before the
 next task. Consequential exceptions and unresolved design decisions retain specific gates.
 
-When Go code is introduced, this page should link to a tested build/test procedure and
-supported development platform versions. Prefer a single Go module and internal
+The [developer setup guide](docs/developer/environment.md) records inspected host/tool
+facts and the proposed native Go build/test/terminal route. It becomes a tested procedure
+only after the first executable slice is exercised; no supported-version matrix is
+established yet. Prefer a single Go module and internal
 packages, with tests next to the implementation and deterministic fixtures. Validate
 native CLI adapters against documented versions; do not scrape a terminal UI when a
 supported structured interface serves the requirement.

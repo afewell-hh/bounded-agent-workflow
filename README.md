@@ -32,9 +32,10 @@ another nested folder with the same name. Start in a new directory, not by overl
 existing application. If you already initialized the tooling repository, preserve it and
 reconcile the contents rather than reinitializing or overwriting its work.
 
-The proposed architecture decision records (ADRs) are **Proposed**, not approved merely
-because they are included. The first bootstrap review adopts or revises them. Committing
-this seed does not authorize implementation or silently accept those ADRs.
+ADRs 0001–0003 are **Accepted** for this repository under the operator's delegated
+[bootstrap decision](https://github.com/afewell-hh/bounded-agent-workflow/issues/2#issuecomment-5907403557).
+Their substantive decisions were adopted as written in seed revision `10425c4`.
+Adoption does not implement the controller or authorize the next implementation ticket.
 
 ## Current workflow: complete the ticket, then ask what is next
 
@@ -66,6 +67,7 @@ Do not overlay this tooling seed or silently replace a project's governing polic
 | Operate manually, bootstrap, or recover | [Manual workflow](docs/operator/manual-workflow.md) |
 | Adopt an existing/new application | [Project adoption](docs/operator/project-adoption.md) |
 | Configure development, previews, and shared labs | [Execution environments](docs/developer/execution-environments.md) |
+| Prepare BAW's native Go development environment | [Developer setup](docs/developer/environment.md) — inspected tools and proposed build/test route |
 | Supply app/API secrets and control external writes | [Secrets and access](docs/developer/secrets-and-access.md) |
 | Complete routine tickets without per-merge human approvals | [GitHub single-account procedure](docs/operator/github-single-account.md) |
 | Verify actual GUI behavior and appearance | [GUI verification](docs/developer/gui-verification.md) |
@@ -76,7 +78,7 @@ Do not overlay this tooling seed or silently replace a project's governing polic
 | Structure and design rationale | [Architecture](docs/architecture/overview.md) and its linked ADRs |
 | Documentation placement and acceptance | [Documentation policy](docs/developer/documentation-policy.md) |
 | Quality requirements and validation gaps | [Verification](docs/developer/verification.md) |
-| Current plan, active lead, tickets, blockers | GitHub issues; one coordination issue points to current records |
+| Current plan, active lead, tickets, blockers | [Project coordination #1](https://github.com/afewell-hh/bounded-agent-workflow/issues/1) |
 | External capability evidence | [Sources](docs/research/sources.md) |
 
 There is intentionally no `CURRENT_STATE.md`, sprint directory, agent transcript store,

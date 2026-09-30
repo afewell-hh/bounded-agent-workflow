@@ -59,6 +59,7 @@ execution. Text instructions are not a security boundary against same-account ac
 For application adoption, use [the adoption guide](docs/operator/project-adoption.md).
 For setup or runtime work, read [execution environments](docs/developer/execution-environments.md)
 and the target project's actual maintained guide; this seed is not a configured environment.
+For BAW development, read [developer setup](docs/developer/environment.md) for inspected facts and the proposed Go route.
 
 For credentials or external actions, use [secrets and access](docs/developer/secrets-and-access.md).
 For GitHub workflow/setup, use [single-account GitHub](docs/operator/github-single-account.md).

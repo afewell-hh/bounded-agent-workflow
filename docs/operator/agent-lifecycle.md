@@ -1,7 +1,8 @@
 # Agent lifecycle and replacement
 
-**Status:** operational policy proposal for manual adoption; runtime enforcement is a
-future controller requirement. Native product capabilities are summarized in
+**Status:** adopted for this repository's bounded manual bootstrap under
+[decision D1](https://github.com/afewell-hh/bounded-agent-workflow/issues/2#issuecomment-5907403557).
+Runtime enforcement is a future controller requirement. Native product capabilities are summarized in
 [the source register](../research/sources.md). Numeric limits here are pilot heuristics,
 not vendor guarantees or experimentally established optima.
 
