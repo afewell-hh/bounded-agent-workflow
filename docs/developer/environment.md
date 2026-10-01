@@ -35,29 +35,25 @@ Native agent/GitHub CLI versions and exact inspection evidence belong in the rel
 ticket's run evidence, indexed by [project coordination](https://github.com/afewell-hh/bounded-agent-workflow/issues/1),
 not a permanent promise about supported adapter versions.
 
-## Proposed native CLI profile
+## Native CLI profile
 
-The first implementation ticket should select this guide's revision and a `native-cli`
-profile: one isolated source worktree, one writer, local Go compilation, deterministic
-tests using disposable Git repositories and fake GitHub responses, and a terminal
-demonstration. No application secrets, server, database, ports, containers, NetBox or
-nested lab are needed for that local slice. Native agent login and GitHub credentials
-remain in their existing tools; offline fixtures do not need access to them.
+The `native-cli` profile is one isolated source worktree, one writer, local Go
+compilation, deterministic tests using disposable Git repositories and fake GitHub
+responses, and a terminal demonstration. No application secrets, server, database,
+ports, containers, NetBox or nested lab are needed. Native agent login and GitHub
+credentials remain in their existing tools; offline fixtures do not need access to them.
 
-Before implementation, the ticket must select the Go version supported by its module,
-confirm compatibility with the available toolchain, and define exact CLI arguments and
-expected results. As of 30 September 2026, installed Go 1.24.1 is outside
-[Go's supported releases](https://go.dev/doc/devel/release#policy); the first code ticket
-will likely need explicit operator approval to install a supported newer toolchain.
-Installing or changing a toolchain requires specific approval.
-Keep toolchain selection local to each command; do not change global Go settings.
-`GOTOOLCHAIN=local` prevents automatic toolchain switching/downloads and fails if the
-module requires a newer version. See [Go toolchain selection](https://go.dev/doc/toolchain).
-
-For this first local profile, propose standard-library Go dependencies with Git as the
-fixture tool. A need for additional dependencies, CGO or live GitHub access must be
-resolved in that ticket's environment requirements. Offline success does not establish
-authenticated native integration or live GitHub behavior.
+The module requires Go 1.27.0 or newer and uses only the standard library, with Git as
+the fixture tool. The approved toolchain is the persistent Go 1.27.1 darwin/arm64 asset
+described under [Selected toolchain](#selected-toolchain); the shared Homebrew Go 1.24.1
+listed below is outside [Go's supported releases](https://go.dev/doc/devel/release#policy)
+and is not used. Installing, replacing or retiring a toolchain still requires specific
+operator approval. Keep toolchain selection local to each command; do not change global
+Go settings. `GOTOOLCHAIN=local` prevents automatic toolchain switching/downloads and
+fails if the module requires a newer version. See
+[Go toolchain selection](https://go.dev/doc/toolchain). Additional dependencies, CGO or
+live GitHub access in tests need that ticket's environment approval. Offline success does
+not establish authenticated native integration or live GitHub behavior.
 
 ## Build and verification commands
 
@@ -88,7 +84,7 @@ code from making network calls: the approved offline tests must use dummy/local 
 The commands write Go cache entries, temporary test fixtures and the named binary;
 they do not install BAW globally. See the [Go command reference](https://pkg.go.dev/cmd/go).
 
-Propose a five-minute wall-clock limit per test, vet or build command, supervised by
+Apply a five-minute wall-clock limit per test, vet or build command, supervised by
 the invoking agent/operator. The test flag additionally limits each package's test
 binary to two minutes. Retain exit codes and sanitized output. On timeout or failure,
 preserve evidence, reconcile any child processes and stop before the next gate; do not
@@ -125,18 +121,28 @@ go test ./cmd/baw -run TestBinaryJourneys -count=1 -args \
 ```
 
 It writes an operator fixture (staged=1 unstaged=1 untracked=1) and `summary.txt` with
-exit codes and outputs of terminal, JSON, invalid-repository, malformed-snapshot, usage
-and help runs.
+exit codes and outputs of terminal, JSON, invalid-repository, malformed-snapshot, usage,
+help and staged-gitlink runs. It also runs fake-`gh` journeys (no network) for the 64 KiB
+stderr boundary and for descendants left by a normal exit or an output overflow, and
+records whether each descendant was gone when the binary returned.
 
 ## Checks actually executed and remaining validation
 
-The implementation worker for the first `baw inspect` slice ran gofmt, the test suite,
-vet, the build above, `go version -m`, SHA-256 and the binary journeys with the selected
-Go 1.27.1 toolchain on the host described above (Git 2.39.5, which also exercised
-SHA-256 object-format repositories). Exact results belong in that ticket's run evidence.
-**Independent fresh-session reproduction, the live read-only GitHub smoke and the
-operator same-binary exercise have not run as part of that work.** Until they do, treat
-this procedure as worker-verified only. Other platforms have not been exercised.
+For the first `baw inspect` candidate, the implementation worker's own run of gofmt,
+tests, vet, build, `go version -m`, SHA-256 and binary journeys passed on the host
+described above. The **independent fresh-session review of that candidate returned
+required fixes**, and its `go test` reproduction failed in its sandbox: Apple Git printed
+a `DARWIN_USER_TEMP_DIR` warning on stderr, which the fixture helper merged into object
+IDs. It also found surviving owned descendants, accepted oversized child stderr and
+uncounted staged gitlinks.
+
+A repaired candidate addresses those findings. Its worker reran the same gates
+(Git 2.39.5, including SHA-256 object-format repositories) with the stderr-warning
+wrapper described in [verification](verification.md). Exact results are in the ticket's
+run evidence. **Independent review and reproduction of the repaired candidate, the live
+read-only GitHub smoke of its binary and the operator same-binary exercise are still
+pending.** Until they complete, treat this procedure as worker-verified only. Other
+platforms have not been exercised.
 
 This CLI profile applies to BAW development. Future application adopters validate their
 own environment using [project adoption](../operator/project-adoption.md), including

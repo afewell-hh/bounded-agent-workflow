@@ -177,18 +177,42 @@ func Inspect(opts Options) (*Packet, error) {
 	if err != nil {
 		return nil, err
 	}
-	repo.Counts.Staged, repo.Counts.Unstaged = st.staged, st.unstaged
-	repo.Counts.Untracked, repo.Counts.Conflicted = st.untracked, st.conflicted
 
+	// Status ignores submodules entirely (no submodule worktree or config is
+	// touched), so staged gitlink changes come from comparing index and HEAD
+	// tree metadata. Neither command reads submodules or applies
+	// diff.ignoreSubmodules / submodule.<name>.ignore.
 	indexOut, err := g.run("ls-files", "--stage", "-z")
 	if err != nil {
 		return nil, err
 	}
-	gitlinks, indexed, err := parseIndex(indexOut)
+	idx, err := parseIndex(indexOut, width)
 	if err != nil {
 		return nil, err
 	}
-	repo.Counts.Submodules = gitlinks
+	headEntries := map[string]entry{}
+	var headFiles map[string]bool
+	if head != "" {
+		out, err := g.run("ls-tree", "-r", "-z", "--full-tree", head)
+		if err != nil {
+			return nil, err
+		}
+		headEntries, headFiles, err = parseTree(out, width)
+		if err != nil {
+			return nil, err
+		}
+	}
+	repo.Counts.Staged = st.staged + stagedGitlinks(headEntries, idx)
+	repo.Counts.Unstaged, repo.Counts.Untracked = st.unstaged, st.untracked
+	// Each unmerged path counts once. Git 2.39.5 status still reports gitlink
+	// conflicts under --ignore-submodules=all; the index check is defensive.
+	repo.Counts.Conflicted = st.conflicted
+	for p := range idx.unmerged {
+		if !st.unmerged[p] {
+			repo.Counts.Conflicted++
+		}
+	}
+	repo.Counts.Submodules = idx.gitlinks
 
 	wtOut, err := g.run("worktree", "list", "--porcelain", "-z")
 	if err != nil {
@@ -237,19 +261,7 @@ func Inspect(opts Options) (*Packet, error) {
 	}
 
 	// Sources.
-	var headFiles map[string]bool
-	if head != "" {
-		args := append([]string{"ls-tree", "-r", "-z", "--full-tree", head, "--"}, SourcePaths...)
-		out, err := g.run(args...)
-		if err != nil {
-			return nil, err
-		}
-		headFiles, err = parseTree(out)
-		if err != nil {
-			return nil, err
-		}
-	}
-	sources, err := inspectSources(top, head, headFiles, indexed, st.paths)
+	sources, err := inspectSources(top, head, headFiles, idx.indexed, st.paths)
 	if err != nil {
 		return nil, err
 	}
@@ -332,7 +344,9 @@ type gitRunner struct {
 
 func mapProcErr(err error) error {
 	switch {
-	case errors.Is(err, proc.ErrTimeout):
+	case errors.Is(err, proc.ErrTimeout), errors.Is(err, proc.ErrCleanup):
+		// ErrCleanup: the bounded join expired with an owned process or
+		// pipe holder still present.
 		return fail(CodeCommandTimeout)
 	case errors.Is(err, proc.ErrOutputLimit):
 		return fail(CodeCommandOutputLimit)

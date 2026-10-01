@@ -24,9 +24,38 @@ repository input, marker-writing filter/fsmonitor/pager/hook/external-diff/textc
 helpers, partial-clone config, poisoned inherited `GIT_*`/`GH_*` variables, a conflicting
 user-level ignore file, dummy secrets in branch/file/content/message/remote/config/ignored
 files/coordination prose, malformed and boundary-size snapshots, fake `gh` argv/environment/
-failure/timeout/output-cap, fake control-bearing Git output, and owned-descendant cleanup.
-Not covered: whether `--ignore-submodules=all` reports a staged gitlink change, Git
-versions other than 2.39.5, and platforms other than darwin/arm64.
+failure/timeout/output-cap, and fake control-bearing Git output.
+
+Every Git call in those tests, from fixture setup and from the inspector, goes through a
+wrapper that prints the stderr warning one host's sandboxed Apple Git emitted
+(`DARWIN_USER_TEMP_DIR`). Fixture helpers return stdout only, validate object IDs and keep
+stderr as separate diagnostics; `internal/testfixture` checks that separation directly.
+
+Staged gitlinks (`gitlink_test.go`): separate add, update, delete and file-to-gitlink
+cases, all combined with a staged file, an unborn repository and a gitlink conflict, each
+with counts fixed by the fixture operations. The same cases repeat with
+`diff.ignoreSubmodules=all` and `.gitmodules`/config `ignore=all`, with a control showing
+ordinary `git diff --cached` hides the change. An initialized submodule whose own
+repository sets marker-writing clean/smudge/fsmonitor/textconv helpers and has dirty
+content is inspected without any marker appearing; a control shows recursive
+`git status` does run those helpers.
+
+Process supervision (`internal/proc`, plus fake `gh`/`git` cases): stdout and stderr
+exact-limit acceptance and one-byte-over `command_output_limit`, including the real
+64 KiB stderr limit. Owned descendants that ignore SIGTERM, with detached or inherited
+stdio, are gone after a normal leader exit, a stdout or stderr overflow (leader still
+running) and a timeout. A descendant that leaves the group with `setsid` while holding
+stdout makes the command fail within the join bound and is not signalled. These shapes
+were also run against the first candidate's process code, where they failed.
+
+Not covered: descendants that leave the group and release their pipes (they cannot be
+observed; see the [inspect guide](../operator/inspect.md#safety-properties-and-limits)),
+Git versions other than 2.39.5, and platforms other than darwin/arm64.
+
+The first candidate's independent review reported required fixes and a failing
+`go test` reproduction in its environment; the repaired candidate's results are worker
+checks until its own independent review completes. Results belong in the ticket's run
+evidence.
 
 ## Layers
 

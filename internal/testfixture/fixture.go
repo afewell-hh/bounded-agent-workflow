@@ -5,10 +5,12 @@
 package testfixture
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -51,15 +53,61 @@ func Env(home string) []string {
 	}
 }
 
-// Git runs fixture setup git in dir and returns trimmed stdout.
-func Git(home, dir string, args ...string) (string, error) {
+// GitOutput runs fixture setup git in dir and returns its stdout and stderr
+// separately. Stderr (for example a host Git warning) is diagnostic evidence
+// only and never becomes part of a returned value.
+func GitOutput(home, dir string, args ...string) (stdout, stderr string, err error) {
 	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "init.defaultBranch=main", "-c", "protocol.file.allow=always", "-c", "core.excludesFile=/dev/null"}, args...)...)
 	cmd.Env = Env(home)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("fixture git %v: %v: %s", args, err, out)
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	if err := cmd.Run(); err != nil {
+		return out.String(), errb.String(), fmt.Errorf("fixture git %v: %v; stderr: %q", args, err, errb.String())
 	}
-	return strings.TrimSpace(string(out)), nil
+	return out.String(), errb.String(), nil
+}
+
+// Git runs fixture setup git in dir and returns trimmed stdout only.
+func Git(home, dir string, args ...string) (string, error) {
+	out, _, err := GitOutput(home, dir, args...)
+	return strings.TrimSpace(out), err
+}
+
+var oidRE = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
+
+// OID resolves rev to a full object ID and rejects anything else, so a
+// diagnostic can never be mistaken for a fixture fact.
+func OID(home, dir, rev string) (string, error) {
+	out, err := Git(home, dir, "rev-parse", "--verify", "--end-of-options", rev)
+	if err != nil {
+		return "", err
+	}
+	if !oidRE.MatchString(out) {
+		return "", fmt.Errorf("fixture rev-parse %s: not a full object ID: %q", rev, out)
+	}
+	return out, nil
+}
+
+// HostWarning is the stderr line the independent reviewer's sandboxed Apple
+// Git printed on every invocation.
+const HostWarning = "git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead"
+
+// InstallWarningGit writes dir/git, a wrapper that prints HostWarning to
+// stderr and then runs the real git found on the current PATH. Prepending dir
+// to PATH reproduces that environment for fixtures and the inspector alike.
+func InstallWarningGit(dir string) error {
+	real, err := exec.LookPath("git")
+	if err != nil {
+		return err
+	}
+	if strings.ContainsRune(real, '\'') {
+		return fmt.Errorf("unsupported git path")
+	}
+	script := "#!/bin/sh\nprintf '%s\\n' \"" + HostWarning + "\" >&2\nexec '" + real + "' \"$@\"\n"
+	if err := Write(filepath.Join(dir, "git"), script); err != nil {
+		return err
+	}
+	return os.Chmod(filepath.Join(dir, "git"), 0o755)
 }
 
 // Write creates a file with parents.
@@ -92,7 +140,7 @@ func CommitSources(home, dir string) (string, error) {
 	if _, err := Git(home, dir, "commit", "-q", "-m", "fixture sources"); err != nil {
 		return "", err
 	}
-	return Git(home, dir, "rev-parse", "HEAD")
+	return OID(home, dir, "HEAD")
 }
 
 // Operator builds the operator journey fixture: committed sources plus one

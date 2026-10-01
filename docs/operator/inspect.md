@@ -55,8 +55,14 @@ read separately; `-` means none. Document bodies are never printed.
 - `Branch state` is `attached`, `detached` or `unborn`. Branch names are never printed.
 - `staged`/`unstaged` count status entries with a change in that column; one file with
   different staged and unstaged versions counts in both. `untracked` counts individual
-  files. `conflicted` counts unmerged entries only. `Submodules` counts gitlinks in the
-  index; submodule contents are not inspected. `Linked worktrees` excludes the one inspected.
+  files. `conflicted` counts unmerged paths once each. `Linked worktrees` excludes the
+  one inspected.
+- `Submodules` counts gitlinks in the index. A staged gitlink addition, update, deletion
+  or type change counts once in `staged`. It is found by comparing the recorded commit
+  IDs in the index with HEAD, so repository `diff.ignoreSubmodules` or `.gitmodules`
+  `ignore=` settings cannot hide it. Submodule contents and submodule worktrees are never
+  inspected: a submodule checked out at a different commit, or with its own edits, is not
+  counted as unstaged.
 - Counts deliberately replace filenames, diffs and commit messages, which can contain
   private material. **Counts do not replace detailed recovery**: inspect the work itself
   before acting on it.
@@ -82,11 +88,12 @@ Exit 1 prints nothing on stdout and exactly `baw: CODE` on stderr. Exit 2 is
 | `checkpoint_diverged` | Checkpoint is not an ancestor of HEAD |
 | `checkpoint_unborn` | Checkpoint requested but HEAD has no commit |
 | `source_symlink` | A maintained-source path component is a symlink (not followed) |
-| `source_unavailable` | A maintained source exists but is not a readable regular file |
+| `source_unavailable` | A maintained source exists but is not a readable regular file (for example, a directory) |
 | `coordination_unavailable` | Snapshot unreadable or `gh` failed (provider text is withheld) |
 | `coordination_invalid` | Snapshot/provider JSON malformed, mismatched, or not an issue |
 | `input_limit` | Snapshot over 1 MiB |
-| `command_timeout`, `command_output_limit` | A Git/gh child exceeded its time or output limit |
+| `command_timeout` | A Git/gh child exceeded its time limit, or its processes/output pipes could not be confirmed closed after termination |
+| `command_output_limit` | A Git/gh child wrote more than its stdout or stderr limit |
 | `output_limit` | Final report over 32 KiB |
 
 With several problems, only the first in this order is reported: usage/path, Git safety
@@ -104,10 +111,24 @@ observations. That does not reconcile the divergence or approve any action.
   and results may differ from your own `git status`. Repository `.gitignore` and
   `.git/info/exclude` still apply.
 - Inherited `GIT_*` and `GH_*`/token variables are not passed to children.
-- Limits: 10 s per Git command, 30 s for `gh`, 120 s overall; 8 MiB Git output per
-  command, 1 MiB `gh` output, 64 KiB child stderr (never printed). Each child runs in its
-  own process group; on timeout or output overflow that group is terminated and joined.
+- Limits: 10 s per Git command, 30 s for `gh`, 120 s overall; 8 MiB Git stdout per
+  command, 1 MiB `gh` stdout, 64 KiB stderr per child. Stderr is never printed. Output
+  exactly at a limit is accepted; one byte more fails with `command_output_limit`. The
+  full index and HEAD tree listings are each one Git command, so a very large repository
+  can exceed the 8 MiB limit and fail rather than report partial counts.
+- Each child runs in a new process group created for that command. Exit of the child it
+  started does not mean the group is gone. After the child exits, or on a timeout or
+  output limit, any processes left in the group get SIGTERM, then SIGKILL one second
+  later. Inspection waits at most one more second for the group to empty and the output
+  pipes to close; otherwise it fails with `command_timeout` and prints no packet. The
+  started child is not reaped until this finishes, so its process and group IDs cannot
+  be reused meanwhile. No other process ID is ever signalled.
+- Boundary: a descendant that moves itself to a different process group or session
+  and closes its output is outside what the inspector can see. Such a process is not
+  signalled. If it still holds an output pipe, inspection fails instead of waiting. Group
+  members you are not permitted to signal are not detected.
 - The `git` and `gh` found on `PATH` are trusted. This is not a sandbox against a
-  same-user adversary. Only darwin/arm64 has been exercised.
+  same-user adversary. Only darwin/arm64 has been exercised; on other platforms the
+  process supervision is not implemented and every child command fails closed.
 - Git 2.39 does not support `GIT_NO_LAZY_FETCH`; the inspector sets it only as defense
   in depth. Refusing partial-clone/promisor repositories is the actual guard.

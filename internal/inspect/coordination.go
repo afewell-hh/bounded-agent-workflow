@@ -158,7 +158,7 @@ func readLive(ctx context.Context, opts Options) (Coordination, error) {
 	})
 	if err != nil {
 		switch {
-		case errors.Is(err, proc.ErrTimeout):
+		case errors.Is(err, proc.ErrTimeout), errors.Is(err, proc.ErrCleanup):
 			return Coordination{}, fail(CodeCommandTimeout)
 		case errors.Is(err, proc.ErrOutputLimit):
 			return Coordination{}, fail(CodeCommandOutputLimit)

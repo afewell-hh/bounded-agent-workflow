@@ -18,7 +18,10 @@ const (
 type statusResult struct {
 	staged, unstaged, untracked, conflicted int
 	paths                                   map[string]statusKind // only allowlisted paths
+	unmerged                                map[string]bool       // every path of a `u` record
 }
+
+const gitlinkMode = "160000"
 
 var allowlisted = func() map[string]bool {
 	m := map[string]bool{}
@@ -51,7 +54,7 @@ func validXY(xy string) bool {
 
 // parseStatus parses `git status --porcelain=v2 -z` without headers.
 func parseStatus(out []byte) (statusResult, error) {
-	r := statusResult{paths: map[string]statusKind{}}
+	r := statusResult{paths: map[string]statusKind{}, unmerged: map[string]bool{}}
 	if len(out) == 0 {
 		return r, nil
 	}
@@ -82,13 +85,19 @@ func parseStatus(out []byte) (statusResult, error) {
 					return r, fail(CodeInvalidGitOutput)
 				}
 			}
+			path = p
+			// Gitlink records are excluded here; staged gitlink changes are
+			// counted once from index/HEAD metadata (stagedGitlinks) and
+			// submodule worktree content is never counted.
+			if f[2][0] == 'S' || f[3] == gitlinkMode || f[4] == gitlinkMode {
+				continue
+			}
 			if f[1][0] != '.' {
 				r.staged++
 			}
 			if f[1][1] != '.' {
 				r.unstaged++
 			}
-			path = p
 			if allowlisted[path] {
 				r.paths[path] = kindChanged
 			}
@@ -98,6 +107,7 @@ func parseStatus(out []byte) (statusResult, error) {
 				return r, fail(CodeInvalidGitOutput)
 			}
 			r.conflicted++
+			r.unmerged[p] = true
 			if allowlisted[p] {
 				r.paths[p] = kindConflict
 			}
@@ -115,34 +125,73 @@ func parseStatus(out []byte) (statusResult, error) {
 	return r, nil
 }
 
-// parseIndex counts stage-0 gitlinks and records which allowlisted paths
-// have any index entry.
-func parseIndex(out []byte) (int, map[string]bool, error) {
-	indexed := map[string]bool{}
-	gitlinks := 0
+// entry is the mode and object ID of one index or tree entry.
+type entry struct{ mode, oid string }
+
+// indexResult holds `git ls-files --stage -z` metadata.
+type indexResult struct {
+	stage0   map[string]entry
+	unmerged map[string]bool // paths with any stage 1-3 entry
+	gitlinks int             // stage-0 gitlinks
+	indexed  map[string]bool // allowlisted paths with any index entry
+}
+
+func validOID(s string, width int) bool { return len(s) == width && hexRE.MatchString(s) }
+
+// parseIndex parses `git ls-files --stage -z` ("MODE OID STAGE\tPATH").
+func parseIndex(out []byte, width int) (indexResult, error) {
+	r := indexResult{stage0: map[string]entry{}, unmerged: map[string]bool{}, indexed: map[string]bool{}}
 	if len(out) == 0 {
-		return 0, indexed, nil
+		return r, nil
 	}
 	if out[len(out)-1] != 0 {
-		return 0, nil, fail(CodeInvalidGitOutput)
+		return r, fail(CodeInvalidGitOutput)
 	}
 	for _, rec := range bytes.Split(out[:len(out)-1], []byte{0}) {
 		tab := bytes.IndexByte(rec, '\t')
-		if tab < 0 {
-			return 0, nil, fail(CodeInvalidGitOutput)
+		if tab < 0 || tab == len(rec)-1 {
+			return r, fail(CodeInvalidGitOutput)
 		}
 		meta := strings.Split(string(rec[:tab]), " ")
-		if len(meta) != 3 || len(meta[0]) != 6 || len(meta[2]) != 1 {
-			return 0, nil, fail(CodeInvalidGitOutput)
+		if len(meta) != 3 || len(meta[0]) != 6 || !validOID(meta[1], width) || len(meta[2]) != 1 || meta[2] < "0" || meta[2] > "3" {
+			return r, fail(CodeInvalidGitOutput)
 		}
-		if meta[0] == "160000" && meta[2] == "0" {
-			gitlinks++
+		p := string(rec[tab+1:])
+		if meta[2] == "0" {
+			r.stage0[p] = entry{meta[0], meta[1]}
+			if meta[0] == gitlinkMode {
+				r.gitlinks++
+			}
+		} else {
+			r.unmerged[p] = true
 		}
-		if p := string(rec[tab+1:]); allowlisted[p] {
-			indexed[p] = true
+		if allowlisted[p] {
+			r.indexed[p] = true
 		}
 	}
-	return gitlinks, indexed, nil
+	return r, nil
+}
+
+// stagedGitlinks counts paths whose stage-0 index entry differs from HEAD
+// where either side is a gitlink: additions, updates, deletions and type
+// changes, each once. Unmerged paths are conflicts, not staged changes. Only
+// recorded object IDs are compared; no submodule is read.
+func stagedGitlinks(head map[string]entry, idx indexResult) int {
+	n := 0
+	for p, e := range idx.stage0 {
+		if e.mode == gitlinkMode && head[p] != e {
+			n++
+		}
+	}
+	for p, h := range head {
+		if h.mode != gitlinkMode || idx.unmerged[p] {
+			continue
+		}
+		if e, ok := idx.stage0[p]; !ok || e.mode != gitlinkMode {
+			n++
+		}
+	}
+	return n
 }
 
 // countWorktrees counts non-bare worktree records other than the current one.
@@ -174,30 +223,33 @@ func countWorktrees(out []byte) (int, error) {
 	return total - 1, nil
 }
 
-// parseTree returns the allowlisted paths that are regular files in HEAD.
-func parseTree(out []byte) (map[string]bool, error) {
+// parseTree parses `git ls-tree -r -z --full-tree` ("MODE TYPE OID\tPATH").
+// It returns every entry and the allowlisted paths that are regular files.
+func parseTree(out []byte, width int) (map[string]entry, map[string]bool, error) {
+	entries := map[string]entry{}
 	files := map[string]bool{}
 	if len(out) == 0 {
-		return files, nil
+		return entries, files, nil
 	}
 	if out[len(out)-1] != 0 {
-		return nil, fail(CodeInvalidGitOutput)
+		return nil, nil, fail(CodeInvalidGitOutput)
 	}
 	for _, rec := range bytes.Split(out[:len(out)-1], []byte{0}) {
 		tab := bytes.IndexByte(rec, '\t')
-		if tab < 0 {
-			return nil, fail(CodeInvalidGitOutput)
+		if tab < 0 || tab == len(rec)-1 {
+			return nil, nil, fail(CodeInvalidGitOutput)
 		}
 		meta := strings.Split(string(rec[:tab]), " ")
-		if len(meta) != 3 {
-			return nil, fail(CodeInvalidGitOutput)
+		if len(meta) != 3 || len(meta[0]) != 6 || !validOID(meta[2], width) {
+			return nil, nil, fail(CodeInvalidGitOutput)
 		}
 		p := string(rec[tab+1:])
+		entries[p] = entry{meta[0], meta[2]}
 		if allowlisted[p] && meta[1] == "blob" && (meta[0] == "100644" || meta[0] == "100755") {
 			files[p] = true
 		}
 	}
-	return files, nil
+	return entries, files, nil
 }
 
 // probeSource lstats each component of rel under top without following links.

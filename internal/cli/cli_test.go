@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -16,9 +17,15 @@ import (
 
 // env prepares an isolated HOME whose user-level Git ignore and config would
 // change results if the inspector read them, and poisons inherited Git/gh
-// variables with decoys.
+// variables with decoys. Every git run (fixture setup and inspector) goes
+// through a wrapper that prints the reviewer host's stderr warning.
 func env(t *testing.T) string {
 	t.Helper()
+	bin := t.TempDir()
+	if err := tf.InstallWarningGit(bin); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 	home := t.TempDir()
 	mustWrite(t, filepath.Join(home, ".config/git/ignore"), "*.txt\n*\n")
 	mustWrite(t, filepath.Join(home, ".gitconfig"), "[core]\n\texcludesFile = "+filepath.Join(home, ".config/git/ignore")+"\n[status]\n\tshowUntrackedFiles = no\n")
@@ -58,6 +65,16 @@ func mustWrite(t *testing.T, path, content string) {
 func git(t *testing.T, home, dir string, args ...string) string {
 	t.Helper()
 	out, err := tf.Git(home, dir, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// oid resolves a fixture revision to a validated full object ID.
+func oid(t *testing.T, home, dir, rev string) string {
+	t.Helper()
+	out, err := tf.OID(home, dir, rev)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +209,7 @@ func TestOperatorFixtureTerminalExact(t *testing.T) {
 func snapshotState(t *testing.T, home, dir string) string {
 	t.Helper()
 	var b strings.Builder
-	b.WriteString(git(t, home, dir, "rev-parse", "HEAD"))
+	b.WriteString(oid(t, home, dir, "HEAD"))
 	for _, f := range []string{".git/index", ".git/HEAD", "a.txt", "new-source.go"} {
 		data, _ := os.ReadFile(filepath.Join(dir, f))
 		b.Write(data)
@@ -214,7 +231,7 @@ func TestRecoveryFixture(t *testing.T) {
 	// Gitlink entry (submodule) committed, third commit.
 	git(t, home, dir, "update-index", "--add", "--cacheinfo", "160000,"+checkpoint+",vendor/sub")
 	git(t, home, dir, "commit", "-q", "-m", "third")
-	head := git(t, home, dir, "rev-parse", "HEAD")
+	head := oid(t, home, dir, "HEAD")
 	git(t, home, dir, "worktree", "add", "-q", filepath.Join(filepath.Dir(dir), "linked"))
 	mustWrite(t, filepath.Join(dir, "a.txt"), "staged version\n")
 	git(t, home, dir, "add", "a.txt")
@@ -363,12 +380,12 @@ func TestCheckpointValidation(t *testing.T) {
 	mustWrite(t, filepath.Join(dir, "s.txt"), "side\n")
 	git(t, home, dir, "add", "s.txt")
 	git(t, home, dir, "commit", "-q", "-m", "side")
-	side := git(t, home, dir, "rev-parse", "HEAD")
+	side := oid(t, home, dir, "HEAD")
 	git(t, home, dir, "checkout", "-q", "main")
 	mustWrite(t, filepath.Join(dir, "m.txt"), "main\n")
 	git(t, home, dir, "add", "m.txt")
 	git(t, home, dir, "commit", "-q", "-m", "main")
-	blob := git(t, home, dir, "rev-parse", "HEAD:m.txt")
+	blob := oid(t, home, dir, "HEAD:m.txt")
 
 	wantFail(t, runCLI(t, nil, "inspect", "--repo", dir, "--checkpoint", side), 1, "checkpoint_diverged")
 	wantFail(t, runCLI(t, nil, "inspect", "--repo", dir, "--checkpoint", strings.Repeat("e", 40)), 1, "checkpoint_missing")
@@ -392,7 +409,7 @@ func TestSHA256Repository(t *testing.T) {
 	mustWrite(t, filepath.Join(dir, "x.txt"), "x\n")
 	git(t, home, dir, "add", "x.txt")
 	git(t, home, dir, "commit", "-q", "-m", "x")
-	head := git(t, home, dir, "rev-parse", "HEAD")
+	head := oid(t, home, dir, "HEAD")
 	got := decode(t, runCLI(t, nil, "inspect", "--repo", dir, "--checkpoint", cp, "--json"))
 	if got.Repository.ObjectFormat != "sha256" || len(*got.Repository.Head) != 64 || *got.Repository.Head != head ||
 		got.Repository.Checkpoint.State != "ancestor" || *got.Repository.Checkpoint.CommitsAhead != 1 {
@@ -455,11 +472,11 @@ func TestFiltersBlockBeforeStatus(t *testing.T) {
 	home := env(t)
 	dir, markers := helperFixture(t, home, true)
 	index, _ := os.ReadFile(filepath.Join(dir, ".git/index"))
-	head := git(t, home, dir, "rev-parse", "HEAD")
+	head := oid(t, home, dir, "HEAD")
 	wantFail(t, runCLI(t, nil, "inspect", "--repo", dir), 1, "unsupported_filters")
 	assertNoMarkers(t, markers)
 	index2, _ := os.ReadFile(filepath.Join(dir, ".git/index"))
-	if !bytes.Equal(index, index2) || git(t, home, dir, "rev-parse", "HEAD") != head {
+	if !bytes.Equal(index, index2) || oid(t, home, dir, "HEAD") != head {
 		t.Fatal("fixture mutated")
 	}
 	// A filter configured only through a repository include is also detected.
@@ -666,7 +683,37 @@ func TestFakeGitHub(t *testing.T) {
 		t.Fatal("timeout not bounded or retried")
 	}
 	assertProcessGone(t, pidFile)
-	// Output cap.
+	limits.GHTimeout = 10 * time.Second
+	// Child stderr at exactly 64 KiB is accepted (and never published); one
+	// byte more is command_output_limit even with valid stdout and exit 0.
+	r, _ = run(`head -c 65536 /dev/zero | tr '\0' x >&2; printf '%s' '` + issue + `'`)
+	if got := decode(t, r); *got.Coordination.Number != 1 || strings.Contains(r.stderr, "x") {
+		t.Fatalf("stderr at cap: %+v", got.Coordination)
+	}
+	r, _ = run(`head -c 65537 /dev/zero | tr '\0' x >&2; printf '%s' '` + issue + `'`)
+	wantFail(t, r, 1, "command_output_limit")
+
+	// Normal exit leaving a detached TERM-ignoring descendant: the packet is
+	// only produced after that owned descendant is gone.
+	pidFile = filepath.Join(t.TempDir(), "pid")
+	r, _ = run(detachedDescendant(pidFile) + `printf '%s' '` + issue + `'`)
+	if got := decode(t, r); *got.Coordination.Number != 1 {
+		t.Fatalf("normal exit %+v", got.Coordination)
+	}
+	assertProcessGone(t, pidFile)
+
+	// Stdout over 1 MiB while the leader keeps running and a detached
+	// TERM-ignoring descendant exists (independent reviewer's probe shape).
+	pidFile = filepath.Join(t.TempDir(), "pid")
+	start = time.Now()
+	r, _ = run(detachedDescendant(pidFile) + `head -c 1048577 /dev/zero; sleep 30`)
+	wantFail(t, r, 1, "command_output_limit")
+	if time.Since(start) > 5*time.Second {
+		t.Fatalf("output cap cleanup not bounded: %v", time.Since(start))
+	}
+	assertProcessGone(t, pidFile)
+
+	// Lowered output cap.
 	limits.GHStdout = 64
 	r, _ = run(`printf '%s' '` + issue + `'`)
 	wantFail(t, r, 1, "command_output_limit")
@@ -712,6 +759,16 @@ func TestLimits(t *testing.T) {
 	decode(t, runCLI(t, &limits, "inspect", "--repo", dir, "--json"))
 	limits.FinalStdout = len(r.stdout) - 1
 	wantFail(t, runCLI(t, &limits, "inspect", "--repo", dir, "--json"), 1, "output_limit")
+
+	// Git child stderr over 64 KiB fails even though Git itself succeeds.
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	noisy := t.TempDir()
+	script(t, filepath.Join(noisy, "git"), `head -c 65537 /dev/zero >&2; exec '`+realGit+`' "$@"`)
+	t.Setenv("PATH", noisy+":"+os.Getenv("PATH"))
+	wantFail(t, runCLI(t, nil, "inspect", "--repo", dir), 1, "command_output_limit")
 
 	// Git timeout via a slow fake git.
 	d := t.TempDir()
