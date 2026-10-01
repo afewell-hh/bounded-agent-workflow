@@ -55,7 +55,8 @@ workers can read operator files, modify secret-consuming code, or use the host D
 model findings and operator authorization are distinct events, not separate GitHub principals.
 Adopted routine scope can authorize verified merge/closure without a later human approval.
 Keep PR/check integration independent from formal approving-review counts and stop before
-the next ticket. Release/production consequences and specific design holds remain separate.
+the next ticket unless an explicit recorded standing delegation applies (see the single-account
+policy). Release/production consequences and specific design holds remain separate.
 An optional protected approval/execution context may later enforce human-only operations
 without another GitHub account; it is not part of this seed or first read-only slice.
 
@@ -90,7 +91,7 @@ placeholder claim that these implementation details have already been solved.
 The controller finalizer uses existing scope authority plus actual independent review,
 mandatory tests and current integration evidence; it does not ask a model to invent an
 approval. Persist candidate/base/result identity, merge uncertainty, post-merge failures,
-closure and the next-ticket stop. Never install the candidate controller/policy as its own
+closure and the next-ticket stop or standing-delegation chain. Never install the candidate controller/policy as its own
 judge. [Closeout](../operator/github-single-account.md) defines the operating conditions.
 
 GUI evidence is produced by a project-specific validated browser/test path and consumed by

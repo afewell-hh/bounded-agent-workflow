@@ -100,7 +100,10 @@ still collide. Different Git worktrees alone do not isolate runtime state [S18].
 Use one writer per workspace and one mutating owner per shared resource. The initial
 pilot remains one approved implementation ticket at a time per project. Separately
 approved parallel tickets/workstreams require proven isolation and explicit capacity;
-this requirement does not grant automatic next-ticket or merge authority. Multiple
+this requirement does not grant automatic next-ticket or merge authority, which follows
+[the closeout policy](../operator/github-single-account.md) (per-ticket by default, or an
+explicit [standing delegation](../operator/github-single-account.md#standing-program-delegation-opt-in)
+that still selects one ticket at a time). Multiple
 projects must share the same resource-ownership mechanism for any common lab.
 
 For remote container engines, record where the source really lives. Bind mounts refer

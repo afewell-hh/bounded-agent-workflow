@@ -1,7 +1,8 @@
 # Agent entry point
 
-This is a documentation-only seed for a future controller. Do not claim a `baw` command
-exists, infer live test results, or implement the entire design in one assignment.
+This repository builds a future controller. The only implemented command is the read-only
+[`baw inspect`](docs/operator/inspect.md); it grants no authority. Do not claim other `baw`
+surfaces exist, infer live test results, or implement the entire design in one assignment.
 
 Read [the common protocol](workflow/protocol.md), then only your assigned
 [role](workflow/roles/lead.md) (lead, worker, reviewer, or helper under that directory).
@@ -17,7 +18,10 @@ conversation or from being the first agent launched.
   from a session restart, compaction, helper response, label, or model-generated comment.
 - Adopted routine-ticket approval includes in-scope push/PR, verified integration merge,
   record updates and ticket closure. Do not request a redundant human merge approval.
-  Then stop before the next ticket. Releases, deployments, production effects, credentials,
+  Then stop before the next ticket, unless an explicit recorded
+  [standing delegation](docs/operator/github-single-account.md#standing-program-delegation-opt-in)
+  lets the lead select it and manage finite in-scope repairs; unclear delegation stops.
+  Releases, deployments, spending, public/destructive/production effects, credentials,
   governing policy, protections and toolchain changes need their specified separate authority.
 - Do not weaken required checks or modify the governing policy while executing a feature.
   The approved baseline governs work even when proposed policy files are under test.
@@ -59,7 +63,7 @@ execution. Text instructions are not a security boundary against same-account ac
 For application adoption, use [the adoption guide](docs/operator/project-adoption.md).
 For setup or runtime work, read [execution environments](docs/developer/execution-environments.md)
 and the target project's actual maintained guide; this seed is not a configured environment.
-For BAW development, read [developer setup](docs/developer/environment.md) for inspected facts and the proposed Go route.
+For BAW development, read [developer setup](docs/developer/environment.md) for inspected facts, the native Go route and actual check results.
 
 For credentials or external actions, use [secrets and access](docs/developer/secrets-and-access.md).
 For GitHub workflow/setup, use [single-account GitHub](docs/operator/github-single-account.md).

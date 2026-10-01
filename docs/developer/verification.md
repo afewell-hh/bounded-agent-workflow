@@ -53,9 +53,11 @@ observed; see the [inspect guide](../operator/inspect.md#safety-properties-and-l
 Git versions other than 2.39.5, and platforms other than darwin/arm64.
 
 The first candidate's independent review reported required fixes and a failing
-`go test` reproduction in its environment; the repaired candidate's results are worker
-checks until its own independent review completes. Results belong in the ticket's run
-evidence.
+`go test` reproduction in its environment. The final repaired candidate then passed all
+of these gates, fresh independent and designated supplementary review, the live smoke
+and the operator exercise, and post-merge checks on `main`; see
+[developer setup](environment.md#checks-actually-executed-and-remaining-validation)
+for the durable record links. Detailed results belong in the ticket's run evidence.
 
 ## Layers
 
@@ -137,7 +139,9 @@ by this seed. Use dummy credentials and disposable resources before live access.
   publishing/deletion. External action permission is narrower than token capability.
 - A single GitHub identity can complete the intended PR/check path with independent model
   findings and preauthorized conditional merge/closeout, without a second approving-review
-  account or per-merge human approval. It stops before the next ticket.
+  account or per-merge human approval. It stops before the next ticket unless a valid
+  recorded [standing delegation](../operator/github-single-account.md#standing-program-delegation-opt-in)
+  applies; its informative closeout report is never recorded as human approval.
   Check last-pusher, CODEOWNERS and deployment self-review conflicts explicitly.
 - No model comment, changed Git author name, new session, skipped mandatory suite, or forged
   local approval becomes human authorization. Required-check source and inherited-rule
@@ -172,7 +176,9 @@ These are future required behaviors, not tests already run by generating the see
 - Given approved routine scope, valid independent review and all required evidence, the
   coordinator can push/open a PR, conditionally merge, confirm post-merge gates, update
   records and close it with no intermediate human merge/demonstration approval. It cannot
-  dispatch the next ticket without its identified scope approval.
+  dispatch the next ticket without its identified scope approval or, where adopted, a valid
+  recorded standing delegation; missing, revoked or out-of-scope delegation, an exhausted
+  cap without a finite recorded extension, or a worker self-extension fails closed.
 - A changed head, base/integration race, untrusted/skipped mandatory check, policy change,
   out-of-scope edit or missing evidence does not reach merge. Benign in-scope revalidation
   uses the recorded budget without demanding a ritual human approval. Exceptions block.

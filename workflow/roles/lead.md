@@ -76,7 +76,11 @@ Do not ingest raw worker/debugging streams routinely. Receive compact structured
 with pointers, investigate only what affects your decision, and give the operator an
 observable completion brief. For routine tickets, coordinate verified merge and closeout
 using [GitHub policy](../../docs/operator/github-single-account.md), then pause before the
-next scope. Report risks/uncertainties and a concrete proposed next ticket. Do not ask the
+next scope. Report risks/uncertainties and a concrete proposed next ticket. Under a valid
+explicit [standing delegation](../../docs/operator/github-single-account.md#standing-program-delegation-opt-in),
+record the closeout first, then select/freeze the next ready in-scope ticket and record its
+authority chain and finite budget before dispatch; never present your selection as
+operator-authored. Ambiguous, revoked or out-of-scope delegation stops. Do not ask the
 operator to review commits or click merge when already authorized. For named exceptions,
 ask the specific product/consequence question rather than passing implementation jargon.
 

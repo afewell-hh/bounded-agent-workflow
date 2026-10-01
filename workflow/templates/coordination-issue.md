@@ -37,7 +37,8 @@ accepted requirements. Unknown live process state is a blocker, not "no process"
 
 ## Suggested next work
 
-A short ordered list of issue links. These are proposals, not permission to dispatch.
+A short ordered list of issue links. These are proposals, not permission to dispatch;
+a lead-selected ticket under a valid standing delegation still records its own chain.
 
 ## Recent transition
 
@@ -54,4 +55,5 @@ Completion mode/target and scope-approval reference:
 Outstanding design/consequence holds (none is distinct from unknown):
 Actual PR head/base, merged commit/state, post-merge gate status and issue closure:
 Next-ticket gate: completed/blocked/awaiting next scope, never implicit authorization:
+Standing-delegation receipt and lead-selected next-ticket chain, if one applies (otherwise "none — per-ticket default"):
 For GUI work, pointers to accepted intent and actual inspected journey/image evidence:

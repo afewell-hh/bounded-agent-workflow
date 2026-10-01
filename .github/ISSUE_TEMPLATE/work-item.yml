@@ -64,13 +64,13 @@ body:
     id: completion
     attributes:
       label: Completion authority and exceptions
-      description: Lead selects adopted routine-integrate policy with exact repo/target and push/PR, verified merge, post-merge gates, record update/closure authority, or names a specific operator hold. Audit production/release effects. No additional human merge approval for routine scope. Stop before next ticket; releases/deployments remain separate.
+      description: Lead selects adopted routine-integrate policy with exact repo/target and push/PR, verified merge, post-merge gates, record update/closure authority, or names a specific operator hold. Audit production/release effects. No additional human merge approval for routine scope. Name the authority source - per-ticket operator approval (default) or a recorded standing delegation with chain operator instruction -> delegation receipt -> lead-selected ticket; never present a lead selection as operator-authored. Stop before next ticket unless valid standing delegation applies; releases/deployments, spending, public/destructive effects, credentials, protections, toolchain and governing-policy changes remain separate.
     validations:
       required: true
   - type: textarea
     id: lifecycle
     attributes:
       label: Lifecycle and stop conditions
-      description: Assignment/run identity; retry and helper budgets; handoff requirements; blockers; approval boundaries; existing consumed budget for recovery. No budget reset on replacement. Preserve one-account GitHub operation; model findings are not human acceptance or a required second-account approval.
+      description: Assignment/run identity; retry and helper budgets; handoff requirements; blockers; approval boundaries; existing consumed budget for recovery; original and current caps plus any finite delegated extension receipt. No budget reset on replacement, rename or successor ticket; exhaustion stops dispatch. Preserve one-account GitHub operation; model findings are not human acceptance or a required second-account approval.
     validations:
       required: true

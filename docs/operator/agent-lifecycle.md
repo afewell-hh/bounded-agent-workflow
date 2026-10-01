@@ -217,7 +217,10 @@ network loss during merge means unknown until queried; never blindly replay the 
 claim a queued PR has completed. Preserve attempt and recovery lineage.
 
 After verified closeout, the state is `COMPLETED_AWAITING_NEXT_SCOPE`. A new lead may report
-that result and propose the next ticket, but cannot infer approval to execute it. Human
+that result and propose the next ticket, but cannot infer approval to execute it. Only a
+recorded, still-valid [standing delegation](github-single-account.md#standing-program-delegation-opt-in)
+lets it select the next ticket; the takeover itself grants nothing, and spent attempt counts,
+caps and ownership carry over unchanged. Human
 release/production/design decisions are only present when explicitly recorded; do not
 invent a human acceptance that ordinary closeout intentionally did not require. Use
 [the closeout policy](github-single-account.md).

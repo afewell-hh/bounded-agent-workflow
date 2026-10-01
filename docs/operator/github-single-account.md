@@ -28,14 +28,61 @@ Human approves one ready ticket (including its routine closeout authority)
   -> integration-context checks + conditional merge to the approved target
   -> confirm actual merge and required post-merge health
   -> update evidence/status, close the completed ticket, report
-  -> STOP before executing another ticket
+  -> STOP before executing another ticket (unless valid standing delegation applies)
 ```
 
-A concise completed-ticket report and a proposed next scope form the normal human
+Without [standing program delegation](#standing-program-delegation-opt-in), this is the
+default: a concise completed-ticket report and a proposed next scope form the normal human
 checkpoint. A single response such as "proceed with the proposed next ticket" may approve
 that identified next scope; it is not retroactive technical approval of the prior commit.
 No response means no next-ticket implementation. The lead may summarize/prepare the next
 proposal, not launch its research, implementation, or helpers without that scope's authority.
+
+## Standing program delegation (opt-in)
+
+This is the canonical rule; other documents link here. Per-ticket operator approval stays
+the default for every project. An operator may instead give an explicit, bounded standing
+delegation for a project or program. Record it as an attributed receipt (see
+[recording authority](#record-operator-authority-with-one-account)) naming:
+
+- the operator source and the lead's announced interpretation;
+- the product goal and scope boundaries;
+- allowed routine actions, repository/target and environment profiles;
+- reserved decisions (below) and revocation/stop conditions.
+
+Under a valid delegation the lead may, without asking the client again:
+
+1. **Select the next ticket.** Only after the previous ticket's outcome and closeout are
+   recorded, select one ready, bounded, in-scope ticket, freeze it, and record its
+   authority chain before dispatch: original operator instruction -> standing
+   delegation receipt -> lead-selected ticket, scope revision and budget. The ticket
+   and budget are lead-selected and are never presented as operator-authored approval.
+   Never dispatch an unbounded multi-ticket worker.
+2. **Manage ordinary repairs.** Run in-scope repair rounds within the ticket's finite
+   budget. Before any dispatch beyond the current cap, the lead may record a finite
+   in-scope extension stating the original and current caps, cumulative counts,
+   rationale and delegation receipt. All spent attempts stay in the same lineage across
+   replacement, renaming or a successor ticket; nothing resets them. An exhausted current
+   cap STOPS dispatch until the lead reconciles and records such an extension or
+   escalates. Workers never extend their own budget. Repeated failure without progress
+   requires diagnosis and a changed plan, not another extension of the same strategy.
+   Review findings never waive a cap or a gate.
+
+Each changed candidate is still frozen, reverified and freshly reviewed. Progress or
+milestone reports are informative; they are not claimed human approval.
+
+Delegation never covers these reserved decisions, which need specific client authority:
+material scope or product-intent changes; meaningful spending; public exposure, releases
+or deployments; destructive, production, shared-lab or live CMS effects; governing-policy
+changes; protection/settings or credential/permission changes; toolchain changes. Ask in
+plain language. Existing native subscriptions, local toolchain and GitHub account remain
+the consumers; delegation adds no API-billing fallback, new account or admin bypass.
+
+Missing, ambiguous, conflicting, revoked or out-of-scope delegation fails closed: stop and
+use the per-ticket default. A new session, label, model finding or ticket closure grants
+nothing, and a restarted lead inherits the same counts and ownership, not new authority.
+Without applicable delegation an exhausted budget and the next ticket both need the
+operator. These rules are manual procedure; `baw inspect` neither grants nor enforces them.
 
 ## Record operator authority with one account
 
@@ -73,15 +120,16 @@ the original records instead of reproducing an approval as if it were a new one.
 
 Keep temporary protection exceptions and their precise expiry in GitHub decision records,
 not this maintained policy. Expiry blocks affected work and cannot be extended by agent
-replacement. Independent review, required verification and the next-ticket stop remain
-required. Routine merge authority follows the approved scope across replacement; it is
+replacement. Independent review and required verification remain required, as does the
+next-ticket stop unless a valid [standing delegation](#standing-program-delegation-opt-in)
+applies. Routine merge authority follows the approved scope across replacement; it is
 not renewed merely because the lead changes.
 
 ## Decide exceptional checkpoints before execution
 
 | Work | Normal disposition |
 |---|---|
-| In-scope implementation with established criteria; no production effects | Agents/controller verify, merge, close, then wait |
+| In-scope implementation with established criteria; no production effects | Agents/controller verify, merge, close, then wait (or apply a valid standing delegation) |
 | GUI implementation of an approved interaction/design | Same, with actual rendered-image and integrated-journey evidence |
 | New/ambiguous UX, subjective design choice or unresolved acceptance | Obtain the specific design decision, preferably at prototype/story stage |
 | Publish a release, deploy/change production, mutate a live CMS, destructive data operation, change credentials/permissions or governing policy | Separate explicit scope/decision for the consequential action; never inferred from routine merge authority |
@@ -158,7 +206,8 @@ skipped/neutral status, which is not BAW evidence that a mandatory test ran [S40
 2. Confirm actual PR head and current target/integration context. A changed head or
    integration result invalidates affected evidence; reverify/review as required within
    the existing budget. In-scope revalidation is not a fresh human approval requirement.
-   Scope changes, ambiguous conflict resolution or exhaustion require a decision.
+   Scope changes, ambiguous conflict resolution or exhaustion require a decision
+   (for exhaustion, a delegated finite extension where the canonical section allows it).
 3. Merge through the normal protected PR path. `gh pr merge --match-head-commit` supports
    an expected head check [S44]; it alone does not pin the target branch or prove all BAW
    gates. Use effective strict checks/queue or another validated integration strategy.
@@ -173,7 +222,9 @@ skipped/neutral status, which is not BAW evidence that a mandatory test ran [S40
 6. Update the issue/coordination index and retain evidence and any operator-held preview.
    Report the behavior, evidence links, actual merge, exclusions/risks, and proposed next
    ticket. Record `COMPLETED_AWAITING_NEXT_SCOPE`; it does not imply human inspection,
-   a release, deployment, or permission to start the next task.
+   a release, deployment, or permission to start the next task. Only a valid
+   [standing delegation](#standing-program-delegation-opt-in) lets the lead select the
+   next ticket after this record.
 
 On disconnect/timeout, query the actual PR/target/check state before retrying. Preserve
 attempts and uncertain effects. A merged result does not need another merge; incomplete
@@ -185,7 +236,9 @@ Waiting on CI or a queue must be bounded and observable, never an infinite retry
 During bootstrap the operator still relays worker/reviewer messages. Once ordinary
 closeout authority is adopted for a ticket, the lead can perform that sequence without
 another merge approval. Initial methodology adoption, live smoke tests and consequential
-policy changes remain explicitly supervised. No actual `baw` command exists in this seed.
+policy changes remain explicitly supervised. The only implemented command is the
+read-only [`baw inspect`](inspect.md); it grants no authority. Controller, gate and
+merge surfaces remain future work.
 
 Native checks and explicit scopes reduce ordinary drift, but full shared-account/OS
 access may allow bypass. A separate terminal or writable approval file is not a strong

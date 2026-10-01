@@ -1,7 +1,8 @@
 # Manual workflow: bootstrap the controller without depending on it
 
-**Available now:** the documents and templates in this seed; your already installed
-native agent/Git/GitHub tools. **Not available:** any `baw` executable or automatic gate.
+**Available now:** the documents and templates; your already installed native
+agent/Git/GitHub tools; the read-only [`baw inspect`](inspect.md) command, which grants
+no authority. **Not available:** any other `baw` controller surface or automatic gate.
 The operator still relays worker/reviewer messages until a validated controller exists.
 The adopted lead/coordinator performs mechanical closeout checks; routine ticket approval
 includes conditional merge and closure, not a second human merge ceremony. Cancellation,
@@ -82,6 +83,11 @@ Decide licensing separately. References for the GitHub CLI flags are in
 
 ## 2. Start a fresh Codex lead
 
+This prompt is the historical first-onboarding runbook, kept as written for that stage;
+it is not current instructions (for example, its "no baw commands exist" line and its
+unconditional next-ticket pause predate later adoption). Today the read-only [`baw inspect`](inspect.md) exists and grants no authority; other
+controller surfaces remain future. Current setup is in [developer setup](../developer/environment.md).
+
 Start `codex` from the repository. Do not resume/fork an old conversation for this first
 onboarding. Paste:
 
@@ -130,7 +136,8 @@ with current sprint status.
 
 ### Establish the tooling environment without overbuilding
 
-For this documentation-only stage, no app exists to run. Inspect the actual host/tool
+For the documentation-only bootstrap stage (now past; see
+[developer setup](../developer/environment.md)), no app exists to run. Inspect the actual host/tool
 versions and agree the minimal Go build/test/terminal demonstration route for the first
 implementation slice. Use [execution environments](../developer/execution-environments.md)
 and adapt only relevant fields into a maintained developer setup guide. The guide must
@@ -156,7 +163,8 @@ The lead proposes the minimal environment bindings and effective rule changes, i
 You approve consequential changes once; routine authorized setup then reuses the selected
 profile. Do not remove inherited required controls without permission. Verify the same
 account can use the intended PR flow without a separate approving review, while retaining
-mandatory checks, independent review, conditional routine merge, and the next-ticket gate. A read-only audit need not change any rule.
+mandatory checks, independent review, conditional routine merge, and the next-ticket gate
+(or a recorded [standing delegation](github-single-account.md#standing-program-delegation-opt-in)). A read-only audit need not change any rule.
 Prove live configuration only in an explicitly authorized test, not by merging a real feature.
 
 ## 4. Rehearse a lead replacement before coding
@@ -238,7 +246,10 @@ run/inspect mandatory verification. Start a fresh Codex reviewer with
 the original criteria, candidate, and evidence. Its review should assess tests and docs,
 not simply agree with the worker. Relay in-scope findings to the worker within the same
 recorded budget. Maintain one writer and reverify the resulting candidate. Stop on
-changed requirements, unknown state, or exhaustion.
+changed requirements, unknown state, or exhaustion. Under a valid
+[standing delegation](github-single-account.md#standing-program-delegation-opt-in) the
+lead may record a finite in-scope extension before the next dispatch instead of asking
+you; spent counts never reset and a repeatedly failing strategy gets diagnosed, not retried.
 
 When review and all mandatory gates pass, relay the reviewer result to the lead. The lead
 acts as closeout coordinator under [the adopted policy](github-single-account.md): confirm
@@ -250,13 +261,16 @@ not same-account GitHub approving reviews or a fabricated claim that you inspect
 The lead then reports what changed, actual verification and merge, known limits, a usable
 preview/demonstration, and one proposed next scope. It STOPS. You can inspect or request a
 repair, or approve that identified next ticket in a single response. No response means no
-next-ticket execution. A failed post-merge check is `MERGED_BLOCKED`, not completed work.
+next-ticket execution. If you gave an explicit standing delegation, the lead instead
+records this outcome, then selects the next ready in-scope ticket and records its
+authority chain; the report is informative, not your approval. Unclear or revoked
+delegation returns to this STOP. A failed post-merge check is `MERGED_BLOCKED`, not completed work.
 
 For new GUI design/interaction decisions, get your input early in a prototype/story; the
 implementation of an accepted design can follow ordinary closeout. Require actual rendered
 image inspection and real integrated journeys under [GUI verification](../developer/gui-verification.md).
 Unresolved design, production/release consequences, governing policy changes and exhausted
-budgets need their specific decisions. Do not treat every GUI edit as a new human hold.
+budgets need their specific decisions (exhaustion only as delegated above). Do not treat every GUI edit as a new human hold.
 
 This is still manual message passing while building BAW; it is not implemented orchestration.
 The removal of redundant merge approval applies now once adopted, not only after the tool exists.
@@ -282,7 +296,7 @@ reconciliation or lab ownership checks.
 The lead keeps the detailed backlog in GitHub, not a new local plan file. The intended
 dependency order is: read-only context/inspection; durable identities/records and crash
 reconciliation; one worker with verification; independent review and bounded repairs;
-guided scope approval, conditional integration/closeout, next-ticket stopping and reliable
+guided scope approval, conditional integration/closeout, next-ticket stopping or standing-delegation checks and reliable
 recovery; then validated helper lifecycle and refresh conveniences. Each slice needs a terminal-visible demonstration and negative
 cases. Do not combine all slices into one ticket.
 
