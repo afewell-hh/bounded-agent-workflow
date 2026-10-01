@@ -231,8 +231,13 @@ base, workspace, policy, context references, selected environment-contract/profi
 resource ownership, preview/demonstration, approved credential bindings and remote action
 scope by reference only, acceptance criteria, documentation impact, budget, completion
 mode, exact integration target, exception holds and any required visual evidence.
-Paste it to a fresh Claude worker. After readiness, approve that single scope once. Under
-adopted `routine-integrate`, this also authorizes in-scope commit/push/PR, gate-checked merge
+Paste it to a fresh Claude worker. By default, after readiness, approve that single scope
+once. Under a valid [standing delegation](github-single-account.md#standing-program-delegation-opt-in)
+you are not asked: after the previous closeout is recorded, the lead freezes the ready
+in-scope ticket and records its scope, finite budget and authority chain before dispatch;
+missing, revoked or out-of-scope delegation returns to your approval. Under
+adopted `routine-integrate`, that approval (or a delegated chain within the delegation's
+allowed routine actions and target) also authorizes in-scope commit/push/PR, gate-checked merge
 to the specified non-production branch, record updates and ticket closure. Native tool
 permission dialogs may still require configuration; do not suppress them with blanket access.
 The worker returns a candidate and evidence, not permission to proceed. It uses approved

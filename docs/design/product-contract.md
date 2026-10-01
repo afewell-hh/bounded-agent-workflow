@@ -147,8 +147,12 @@ initial product; deliberate replacement of the binary is sufficient.
 [The closeout policy](../operator/github-single-account.md) defines complete-ticket authority,
 non-production integration versus release, exact head/base/result evidence, actual merge
 confirmation and post-merge failure handling. Persist completion mode and any human holds.
-A queue request is not a completed merge. After `COMPLETED_AWAITING_NEXT_SCOPE`, no new
-implementation is dispatched until the operator approves its identified scope. Keep budget
+A queue request is not a completed merge. After `COMPLETED_AWAITING_NEXT_SCOPE`, by default
+no new implementation is dispatched until the operator approves its identified scope. Under
+a valid [standing delegation](../operator/github-single-account.md#standing-program-delegation-opt-in)
+the lead may instead dispatch a ready, frozen, bounded in-scope ticket after recording the
+prior closeout and that ticket's scope, finite budget and authority chain; progress reports
+stay informative, not approval. Missing, revoked or out-of-scope delegation fails closed. Keep budget
 and merge/record-recovery lineage across replacements. Git rollback is not external rollback.
 
 [GUI verification](../developer/gui-verification.md) is an evidence requirement, not an
