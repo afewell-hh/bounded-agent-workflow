@@ -1,9 +1,32 @@
 # Verification contract
 
-**Initial state:** the seed has no implementation and no software test suite. Packaging
+**Current state:** only the read-only `baw inspect` slice is implemented. Packaging
 checks are not execution tests. The earlier Python prototype's test count is not evidence
-that a new Go implementation behaves correctly. Populate real commands only after they
-are implemented, executed, and reviewed in this repository.
+that a new Go implementation behaves correctly. Everything below that slice remains a
+future requirement.
+
+## Implemented slice gates: `baw inspect`
+
+Run with the [developer setup](environment.md) toolchain and commands:
+
+- `gofmt -l .` empty; `go test -count=1 -timeout=2m ./...`; `go vet ./...`;
+  `go build -trimpath -o NEW_ARTIFACT_DIR/baw ./cmd/baw`; `go version -m`; SHA-256.
+- Binary journeys (`TestBinaryJourneys`) against the built artifact.
+- Independent fresh reproduction and review, an authorized live read-only smoke against
+  the coordination issue, and an operator exercise of the same binary. Package tests and
+  fake `gh` do not prove native authentication or live GitHub behavior.
+
+Offline tests in `internal/cli` use real Git fixtures with independently established
+facts: clean/recovery/conflict/unborn/detached repositories, distinct staged and unstaged
+versions of one file, linked worktree, gitlink, ancestor/equal/diverged/missing
+checkpoints for SHA-1 and SHA-256, source symlink rejection, subdirectory and symlinked
+repository input, marker-writing filter/fsmonitor/pager/hook/external-diff/textconv/gpg
+helpers, partial-clone config, poisoned inherited `GIT_*`/`GH_*` variables, a conflicting
+user-level ignore file, dummy secrets in branch/file/content/message/remote/config/ignored
+files/coordination prose, malformed and boundary-size snapshots, fake `gh` argv/environment/
+failure/timeout/output-cap, fake control-bearing Git output, and owned-descendant cleanup.
+Not covered: whether `--ignore-submodules=all` reports a staged gitlink change, Git
+versions other than 2.39.5, and platforms other than darwin/arm64.
 
 ## Layers
 

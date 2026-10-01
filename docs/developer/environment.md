@@ -2,9 +2,21 @@
 
 Use a native Go toolchain and a local terminal for BAW's first executable slice.
 This guide adapts [execution environments](execution-environments.md) for contributors
-to this tooling repository. **No Go module, application, executable or software test
-suite exists yet.** The build and demonstration route below is proposed until
-implemented and exercised.
+to this tooling repository. The module `github.com/afewell-hh/bounded-agent-workflow`
+(minimum Go 1.27.0, standard library only) provides `cmd/baw` with the read-only
+[`baw inspect`](../operator/inspect.md) command and its tests. See the last section for
+which checks have actually run and what remains unvalidated.
+
+## Selected toolchain
+
+The `native-cli` profile uses an isolated official Go 1.27.1 darwin/arm64 toolchain,
+installed after checksum verification into a private run directory and registered as a
+persistent project asset (`~/.local/state/baw/toolchain-assets/go1.27.1-darwin-arm64.json`).
+Homebrew Go and global Go settings are unchanged. Invoke the toolchain by explicit path or a
+per-command `PATH` prefix. The toolchain subtree has **no run-expiry cleanup**: it remains
+until the operator explicitly retires or replaces the asset and dependent runs are
+reconciled. Run-root cleanup must exclude `toolchain/`. Binary, fixture and evidence
+retention is a separate rule (at least 30 days after ticket closure and any hold).
 
 ## Inspected facts
 
@@ -17,7 +29,7 @@ They are observations, not a supported-platform matrix or minimum-version policy
 | Go executable | `/opt/homebrew/bin/go` |
 | Installed Go | `go1.24.1 darwin/arm64`, also confirmed with `GOTOOLCHAIN=local` |
 | Git | 2.39.5, Apple Git-154 |
-| Source | Documentation seed; no `go.mod` or Go application source |
+| Source (at inspection time) | Documentation seed; no `go.mod` or Go application source |
 
 Native agent/GitHub CLI versions and exact inspection evidence belong in the relevant
 ticket's run evidence, indexed by [project coordination](https://github.com/afewell-hh/bounded-agent-workflow/issues/1),
@@ -47,15 +59,15 @@ fixture tool. A need for additional dependencies, CGO or live GitHub access must
 resolved in that ticket's environment requirements. Offline success does not establish
 authenticated native integration or live GitHub behavior.
 
-## Proposed build and verification commands
+## Build and verification commands
 
-**Do not run these against the documentation seed.** After an approved slice provides
-`go.mod`, tests and `cmd/baw`, run from its assigned worktree root. First record the
+Run from the assigned worktree root with the selected toolchain first on `PATH`. Also
+run `gofmt -l .` (expect no output). First record the
 candidate commit and any dirty-file identities. Allocate a new owner-only artifact
 directory outside the checkout under the ticket's approved evidence location; set
 `baw_artifact_dir` to that absolute path. Never reuse a held binary's output path.
 
-The following is a proposed command sequence, not an executed result:
+The command sequence:
 
 ```sh
 (
@@ -103,14 +115,28 @@ replacement inspects existing artifacts and process ownership before continuing;
 rebuilding, deleting fixtures or terminating an unknown process is not implicit recovery.
 Only the designated owner cleans up that run's paths after any inspection hold ends.
 
+Tests create disposable Git repositories with an isolated `HOME` and run the real
+`git`; GitHub behavior uses a fake `gh` on `PATH`. They make no network calls and need no
+credentials. To exercise a built binary against dummy fixtures in a new directory:
+
+```sh
+go test ./cmd/baw -run TestBinaryJourneys -count=1 -args \
+  -baw-binary="$baw_artifact_dir/baw" -journey-dir=NEW_EVIDENCE_DIR/journeys
+```
+
+It writes an operator fixture (staged=1 unstaged=1 untracked=1) and `summary.txt` with
+exit codes and outputs of terminal, JSON, invalid-repository, malformed-snapshot, usage
+and help runs.
+
 ## Checks actually executed and remaining validation
 
-Executed during documentation preparation: host/architecture probes, tool version
-queries including `GOTOOLCHAIN=local go version`, and source inventory. These establish
-tool availability only. **No Go build, tests, vet, binary inspection or operator binary
-demonstration has run.** The profile remains unvalidated until the first executable
-slice supplies those results and fresh-session reproduction. Record actual results in
-the ticket/run evidence, then update this guide to describe the verified procedure.
+The implementation worker for the first `baw inspect` slice ran gofmt, the test suite,
+vet, the build above, `go version -m`, SHA-256 and the binary journeys with the selected
+Go 1.27.1 toolchain on the host described above (Git 2.39.5, which also exercised
+SHA-256 object-format repositories). Exact results belong in that ticket's run evidence.
+**Independent fresh-session reproduction, the live read-only GitHub smoke and the
+operator same-binary exercise have not run as part of that work.** Until they do, treat
+this procedure as worker-verified only. Other platforms have not been exercised.
 
 This CLI profile applies to BAW development. Future application adopters validate their
 own environment using [project adoption](../operator/project-adoption.md), including
