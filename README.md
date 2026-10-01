@@ -9,10 +9,10 @@
 This archive is self-contained and replaces all previously supplied seed downloads.
 You do not need an earlier ZIP, a separate Markdown attachment, or the old Python kit.
 
-**Status: documentation-only bootstrap seed.** There is no implemented Go controller,
-`baw` executable, installed plugin, configured application, or passing software suite
-in this package. All `baw` command examples are proposed interfaces, not available
-commands. Preparing this archive did not create a GitHub repository or issue.
+**Status: early implementation.** The only implemented command is the read-only
+[`baw inspect`](docs/operator/inspect.md), built from source with Go. There is no
+controller, release, installed plugin or configured application. Other `baw` command
+examples remain proposed interfaces, not available commands.
 
 The intended product combines a lightweight, human-gated development method with one
 standalone Go executable. It coordinates subscription-authenticated native Codex and
@@ -67,7 +67,8 @@ Do not overlay this tooling seed or silently replace a project's governing polic
 | Operate manually, bootstrap, or recover | [Manual workflow](docs/operator/manual-workflow.md) |
 | Adopt an existing/new application | [Project adoption](docs/operator/project-adoption.md) |
 | Configure development, previews, and shared labs | [Execution environments](docs/developer/execution-environments.md) |
-| Prepare BAW's native Go development environment | [Developer setup](docs/developer/environment.md) — inspected tools and proposed build/test route |
+| Inspect a repository's state read-only | [`baw inspect`](docs/operator/inspect.md) |
+| Prepare BAW's native Go development environment | [Developer setup](docs/developer/environment.md) — toolchain, build and test route |
 | Supply app/API secrets and control external writes | [Secrets and access](docs/developer/secrets-and-access.md) |
 | Complete routine tickets without per-merge human approvals | [GitHub single-account procedure](docs/operator/github-single-account.md) |
 | Verify actual GUI behavior and appearance | [GUI verification](docs/developer/gui-verification.md) |

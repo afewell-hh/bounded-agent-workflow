@@ -1,9 +1,61 @@
 # Verification contract
 
-**Initial state:** the seed has no implementation and no software test suite. Packaging
+**Current state:** only the read-only `baw inspect` slice is implemented. Packaging
 checks are not execution tests. The earlier Python prototype's test count is not evidence
-that a new Go implementation behaves correctly. Populate real commands only after they
-are implemented, executed, and reviewed in this repository.
+that a new Go implementation behaves correctly. Everything below that slice remains a
+future requirement.
+
+## Implemented slice gates: `baw inspect`
+
+Run with the [developer setup](environment.md) toolchain and commands:
+
+- `gofmt -l .` empty; `go test -count=1 -timeout=2m ./...`; `go vet ./...`;
+  `go build -trimpath -o NEW_ARTIFACT_DIR/baw ./cmd/baw`; `go version -m`; SHA-256.
+- Binary journeys (`TestBinaryJourneys`) against the built artifact.
+- Independent fresh reproduction and review, an authorized live read-only smoke against
+  the coordination issue, and an operator exercise of the same binary. Package tests and
+  fake `gh` do not prove native authentication or live GitHub behavior.
+
+Offline tests in `internal/cli` use real Git fixtures with independently established
+facts: clean/recovery/conflict/unborn/detached repositories, distinct staged and unstaged
+versions of one file, linked worktree, gitlink, ancestor/equal/diverged/missing
+checkpoints for SHA-1 and SHA-256, source symlink rejection, subdirectory and symlinked
+repository input, marker-writing filter/fsmonitor/pager/hook/external-diff/textconv/gpg
+helpers, partial-clone config, poisoned inherited `GIT_*`/`GH_*` variables, a conflicting
+user-level ignore file, dummy secrets in branch/file/content/message/remote/config/ignored
+files/coordination prose, malformed and boundary-size snapshots, fake `gh` argv/environment/
+failure/timeout/output-cap, and fake control-bearing Git output.
+
+Every Git call in those tests, from fixture setup and from the inspector, goes through a
+wrapper that prints the stderr warning one host's sandboxed Apple Git emitted
+(`DARWIN_USER_TEMP_DIR`). Fixture helpers return stdout only, validate object IDs and keep
+stderr as separate diagnostics; `internal/testfixture` checks that separation directly.
+
+Staged gitlinks (`gitlink_test.go`): separate add, update, delete and file-to-gitlink
+cases, all combined with a staged file, an unborn repository and a gitlink conflict, each
+with counts fixed by the fixture operations. The same cases repeat with
+`diff.ignoreSubmodules=all` and `.gitmodules`/config `ignore=all`, with a control showing
+ordinary `git diff --cached` hides the change. An initialized submodule whose own
+repository sets marker-writing clean/smudge/fsmonitor/textconv helpers and has dirty
+content is inspected without any marker appearing; a control shows recursive
+`git status` does run those helpers.
+
+Process supervision (`internal/proc`, plus fake `gh`/`git` cases): stdout and stderr
+exact-limit acceptance and one-byte-over `command_output_limit`, including the real
+64 KiB stderr limit. Owned descendants that ignore SIGTERM, with detached or inherited
+stdio, are gone after a normal leader exit, a stdout or stderr overflow (leader still
+running) and a timeout. A descendant that leaves the group with `setsid` while holding
+stdout makes the command fail within the join bound and is not signalled. These shapes
+were also run against the first candidate's process code, where they failed.
+
+Not covered: descendants that leave the group and release their pipes (they cannot be
+observed; see the [inspect guide](../operator/inspect.md#safety-properties-and-limits)),
+Git versions other than 2.39.5, and platforms other than darwin/arm64.
+
+The first candidate's independent review reported required fixes and a failing
+`go test` reproduction in its environment; the repaired candidate's results are worker
+checks until its own independent review completes. Results belong in the ticket's run
+evidence.
 
 ## Layers
 
