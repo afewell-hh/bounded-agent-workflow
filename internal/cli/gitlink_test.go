@@ -199,6 +199,122 @@ func TestNestedSubmoduleHelpersNotRun(t *testing.T) {
 	assertNoMarkers(t, markers)
 }
 
+// typechangeBase initializes a repository in the given object format with
+// committed sources and returns it with HEAD (c1), usable as a gitlink target.
+func typechangeBase(t *testing.T, home, format string) (dir, c1 string) {
+	t.Helper()
+	dir = filepath.Join(t.TempDir(), "r")
+	if err := tf.Init(home, dir, format); err != nil {
+		t.Skipf("%s repositories unavailable in this Git: %v", format, err)
+	}
+	c1, err := tf.CommitSources(home, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir, c1
+}
+
+// sourceStates maps each source path to its reported worktree state.
+func sourceStates(p inspect.Packet) map[string]string {
+	m := map[string]string{}
+	for _, s := range p.Sources {
+		m[s.Path] = s.WorktreeState
+	}
+	return m
+}
+
+func assertSourcesClean(t *testing.T, label string, p inspect.Packet, except string) {
+	t.Helper()
+	for path, state := range sourceStates(p) {
+		if path != except && state != "clean" {
+			t.Fatalf("%s: source %s state %q want clean", label, path, state)
+		}
+	}
+}
+
+// A committed gitlink replaced by a staged regular file, then edited again:
+// the staged type change is counted once and the regular file's unstaged
+// edit is counted separately. Expectations follow from the operations.
+func TestGitlinkToFileTypechange(t *testing.T) {
+	for _, format := range []string{"sha1", "sha256"} {
+		t.Run(format, func(t *testing.T) {
+			home := env(t)
+			dir, c1 := typechangeBase(t, home, format)
+			git(t, home, dir, "update-index", "--add", "--cacheinfo", "160000,"+c1+",former-sub")
+			git(t, home, dir, "commit", "-q", "-m", "gitlink")
+
+			mustWrite(t, filepath.Join(dir, "former-sub"), "one\n")
+			git(t, home, dir, "add", "-f", "former-sub")
+			got := decode(t, runCLI(t, nil, "inspect", "--repo", dir, "--json"))
+			if got.Repository.Counts != (inspect.Counts{Staged: 1}) {
+				t.Fatalf("staged only: counts %+v", got.Repository.Counts)
+			}
+
+			mustWrite(t, filepath.Join(dir, "former-sub"), "two two\n")
+			st := git(t, home, dir, "status", "--porcelain=v2", "--ignore-submodules=all")
+			if !strings.Contains(st, "1 TM ") || !strings.Contains(st, " 160000 100644 100644 ") {
+				t.Fatalf("fixture did not produce a staged gitlink-to-file type change with an unstaged edit: %q", st)
+			}
+			got = decode(t, runCLI(t, nil, "inspect", "--repo", dir, "--json"))
+			if got.Repository.Counts != (inspect.Counts{Staged: 1, Unstaged: 1}) {
+				t.Fatalf("staged and unstaged: counts %+v", got.Repository.Counts)
+			}
+			assertSourcesClean(t, format, got, "")
+		})
+	}
+}
+
+// A committed regular README.md whose index entry becomes a gitlink while a
+// regular README.md stays in the worktree: one staged change, no unstaged
+// change, and the maintained source is modified.
+func TestSourceToGitlinkTypechange(t *testing.T) {
+	for _, format := range []string{"sha1", "sha256"} {
+		t.Run(format, func(t *testing.T) {
+			home := env(t)
+			dir, c1 := typechangeBase(t, home, format)
+			git(t, home, dir, "update-index", "--force-remove", "README.md")
+			git(t, home, dir, "update-index", "--add", "--cacheinfo", "160000,"+c1+",README.md")
+			if fi, err := os.Lstat(filepath.Join(dir, "README.md")); err != nil || !fi.Mode().IsRegular() {
+				t.Fatalf("fixture README.md not a regular worktree file: %v", err)
+			}
+			got := decode(t, runCLI(t, nil, "inspect", "--repo", dir, "--json"))
+			if got.Repository.Counts != (inspect.Counts{Staged: 1, Submodules: 1}) {
+				t.Fatalf("counts %+v", got.Repository.Counts)
+			}
+			for _, s := range got.Sources {
+				if s.Path != "README.md" {
+					continue
+				}
+				if s.Presence != "present" || s.WorktreeState != "modified" ||
+					s.HeadRef == nil || *s.HeadRef != "git:"+c1+":README.md" ||
+					s.WorktreeRef == nil || *s.WorktreeRef != "worktree:README.md" {
+					t.Fatalf("README.md source %+v", s)
+				}
+			}
+			assertSourcesClean(t, format, got, "README.md")
+		})
+	}
+}
+
+// A pure staged gitlink update with no regular-file change: staged only.
+func TestPureGitlinkUpdate(t *testing.T) {
+	for _, format := range []string{"sha1", "sha256"} {
+		t.Run(format, func(t *testing.T) {
+			home := env(t)
+			dir, c1 := typechangeBase(t, home, format)
+			git(t, home, dir, "update-index", "--add", "--cacheinfo", "160000,"+c1+",sub")
+			git(t, home, dir, "commit", "-q", "-m", "gitlink")
+			c2 := oid(t, home, dir, "HEAD")
+			git(t, home, dir, "update-index", "--cacheinfo", "160000,"+c2+",sub")
+			got := decode(t, runCLI(t, nil, "inspect", "--repo", dir, "--json"))
+			if got.Repository.Counts != (inspect.Counts{Staged: 1, Submodules: 1}) {
+				t.Fatalf("counts %+v", got.Repository.Counts)
+			}
+			assertSourcesClean(t, format, got, "")
+		})
+	}
+}
+
 func mustReadDir(t *testing.T, dir string) []os.DirEntry {
 	t.Helper()
 	ents, err := os.ReadDir(dir)

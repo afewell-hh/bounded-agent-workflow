@@ -86,19 +86,18 @@ func parseStatus(out []byte) (statusResult, error) {
 				}
 			}
 			path = p
-			// Gitlink records are excluded here; staged gitlink changes are
-			// counted once from index/HEAD metadata (stagedGitlinks) and
-			// submodule worktree content is never counted.
-			if f[2][0] == 'S' || f[3] == gitlinkMode || f[4] == gitlinkMode {
-				continue
-			}
-			if f[1][0] != '.' {
+			// Staged changes of gitlink-involved records are counted once from
+			// index/HEAD metadata (stagedGitlinks). The worktree column still
+			// counts when the index holds an ordinary file; submodule worktree
+			// content (index gitlink) is never counted.
+			gitlink := f[2][0] == 'S' || f[3] == gitlinkMode || f[4] == gitlinkMode
+			if f[1][0] != '.' && !gitlink {
 				r.staged++
 			}
-			if f[1][1] != '.' {
+			if f[1][1] != '.' && f[4] != gitlinkMode {
 				r.unstaged++
 			}
-			if allowlisted[path] {
+			if allowlisted[path] && f[1] != ".." {
 				r.paths[path] = kindChanged
 			}
 		case 'u':
