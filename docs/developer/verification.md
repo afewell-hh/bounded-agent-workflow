@@ -72,12 +72,17 @@ unavailable SHA-256 fixture fails rather than skips.
   valid and 16385-byte oversized records; invalid UTF-8, trailing/duplicate (including
   escaped) keys, case variants, quoted/fractional/exponent/null/huge versions and their
   precedence, timestamps and width mismatches; root, namespace and record symlink, FIFO,
-  socket, directory, owner/mode cases without blocking or touching outside markers;
-  injected failures at each storage stage with their codes, retained staging and
-  pre/post-publication results; stage order (root sync after namespace acquisition,
-  namespace sync after publication); child-process interruption before and after
-  publication; and bounded, joined concurrent same-ID creators from absent and present
-  namespaces (one success, one `record_exists`, winner's data intact).
+  socket, directory, owner/mode cases without blocking or touching outside markers; an
+  ancestor symlink inside the test's own directory resolved while the same symlink as
+  the final root is refused; injected failures at each storage stage with their codes,
+  retained staging and pre/post-publication results; stage order (root sync after
+  namespace acquisition, namespace sync after publication); child-process interruption
+  before and after publication; and bounded concurrent same-ID creators from absent and
+  present namespaces (one success, one `record_exists`, winner's data intact), all
+  joined, including after a failed child start. Escaped-duplicate fixtures contain actual
+  JSON `\u` escapes. The socket case links a real closed socket inode, created by a
+  joined child or supplied by `BAW_TEST_SOCKET_FIXTURE`
+  ([socket fixture](environment.md#socket-fixture)); a missing or invalid fixture fails.
 - `internal/cli`: both object formats via a subdirectory with uppercase input, dirty and
   secret-bearing worktrees, nonexistent policy references, opposite widths, unborn and
   inspection failures leaving the root unchanged, repeat status, duplicates, status with
@@ -88,9 +93,11 @@ unavailable SHA-256 fixture fails rather than skips.
 
 Not covered: hardware or power-loss durability, platforms/filesystems other than this
 host's macOS APFS, and hostile same-user changes to the state directory during a run.
-Worker gate results for this slice are recorded in
-[developer setup](environment.md#checks-actually-executed-and-remaining-validation);
-independent review is a separate, still-required gate.
+The first committed candidate's independent review observed the full suite fail where
+socket bind was denied, and two tests writing under `/tmp`; the fixtures were reworked.
+Gate and review history for this slice is summarized in
+[developer setup](environment.md#checks-actually-executed-and-remaining-validation),
+with detailed results in the ticket's run evidence.
 
 ## Layers
 

@@ -154,6 +154,11 @@ everything else exits 1. Inspection failures keep [inspect's codes](inspect.md#f
 | `output_unavailable` | Status or new help output could not be fully written |
 | `output_limit` | Rendered output would exceed 16384 bytes (checked before publication) |
 
+After `commit_uncertain`, run `baw status` with the same `--state-dir` and `--run-id` to
+see whether the record reads back. Keep the record and its staging name, and do not edit
+them. Do not repeat create blindly: the same ID only reports `record_exists`, and a new ID
+would create a second record for the same work.
+
 Order of checks for create: syntax; `DIR` and (if present) namespace safety, with no
 directory created; full inspection, unborn HEAD, policy width; existing ID. Any of these
 failing leaves a `DIR` without a namespace byte-for-byte unchanged. Only then is
@@ -176,7 +181,7 @@ If stdout fails part-way, bytes already written cannot be withdrawn: create then
 `commit_uncertain` (the record exists) and status `output_unavailable`. A failing stderr
 may hide the code; the exit status is still set.
 
-Two concurrent creates of one ID produce one success and one `record_exists`, never a
-mixed record. The design assumes trusted ancestor directories and no hostile same-user
+When storage operations succeed, two concurrent creates of one ID produce one success
+and one `record_exists`, never a mixed record. The design assumes trusted ancestor directories and no hostile same-user
 changes to the namespace while BAW runs; symlink and permission checks prevent mistakes,
 they are not isolation.

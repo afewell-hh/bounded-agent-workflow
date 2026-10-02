@@ -139,6 +139,23 @@ SHA-256 fixture fails the test), and records in `summary.txt` the help, usage, c
 status, duplicate, opposite-width, corrupt-record and documentation-example runs, plus
 status with the repositories removed and only marker-writing fake `git`/`gh` on `PATH`.
 
+### Socket fixture
+
+`internal/state` checks that status rejects a Unix socket at the record path. Without
+extra setup, the test runs a child of its own test binary in a new test-owned directory
+under `TMPDIR`; the child binds a socket with the short relative name `s`, closes it
+without unlinking and exits, and the test waits for it. The test then hard-links that
+closed inode to the record path and confirms it is a socket before reading. No listener
+remains and the test process's working directory is unchanged.
+
+Where socket bind is denied, set `BAW_TEST_SOCKET_FIXTURE` for the test command only, to
+an existing closed Unix socket inode owned by the current user, outside the checkout and
+on the same filesystem as `TMPDIR`. The test checks its type and owner, hard-links it into
+its own temporary directory and fails, never skips, if the fixture is missing, of another
+type, owned by someone else or cannot be linked. Only tests read this variable; `baw`
+does not. Creating the fixture needs one bind in a directory you own, for example by a
+host process outside the restricted environment; it is test data, not a running service.
+
 ## Checks actually executed and remaining validation
 
 For the first `baw inspect` candidate, the implementation worker's own run of gofmt,
@@ -167,8 +184,14 @@ observed `0700`/`0600` modes, successful `os.File.Sync` on root, namespace and f
 an exclusive hard link that left an existing name unchanged (link count 2). The
 implementation worker's own run of gofmt, tests, vet, build, `go version -m`, SHA-256,
 `TestBinaryJourneys` and `TestRunRecordBinaryJourneys` then passed for the uncommitted
-candidate. That is the worker's result only: independent review of the candidate is
-still pending, and nothing has been merged on the strength of it.
+candidate. That was the worker's result only, not independent review or acceptance.
+The first independent review of the committed candidate then observed the full
+`go test` fail in a managed sandbox that denies Unix-socket bind: the socket-rejection
+test created its socket by listening at the record path. It also found two tests creating
+directories under `/tmp` instead of `TMPDIR`. The fixtures were reworked as described in
+[socket fixture](#socket-fixture). Review, gate and integration results for this slice are
+recorded on [ticket #9](https://github.com/afewell-hh/bounded-agent-workflow/issues/9),
+which indexes its run evidence.
 
 This CLI profile applies to BAW development. Future application adopters validate their
 own environment using [project adoption](../operator/project-adoption.md), including

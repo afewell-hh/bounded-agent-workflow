@@ -299,23 +299,30 @@ func TestRootAndNamespaceSafety(t *testing.T) {
 			t.Errorf("%s: got %v want %s", c.dir, err, c.want)
 		}
 	}
-	// Trailing slash and dot components on a real directory are accepted;
-	// an ancestor alias (macOS /tmp -> /private/tmp) is resolved.
+	// Trailing slash and dot components on a real directory are accepted.
 	for _, d := range []string{good + "/", good + "/.", filepath.Join(base, "x", "..", "good")} {
 		if _, err := OpenRoot(d); err != nil {
 			t.Errorf("%s: %v", d, err)
 		}
 	}
-	if fi, err := os.Lstat("/tmp"); err == nil && fi.Mode()&os.ModeSymlink != 0 {
-		alias, err := os.MkdirTemp("/tmp", "baw-state-")
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer os.RemoveAll(alias)
-		os.Chmod(alias, 0o700)
-		if _, err := OpenRoot(alias); err != nil {
-			t.Errorf("/tmp alias: %v", err)
-		}
+	// An ancestor alias (like macOS /tmp -> /private/tmp) is resolved, while
+	// the same symlink as the final component is still refused.
+	target := mk("target", 0o700)
+	if err := os.Mkdir(filepath.Join(target, "state"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(base, "alias")
+	if err := os.Symlink(target, alias); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Lstat(alias); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("alias fixture is not a symlink: %v", err)
+	}
+	if _, err := OpenRoot(filepath.Join(alias, "state")); err != nil {
+		t.Errorf("ancestor alias: %v", err)
+	}
+	if _, err := OpenRoot(alias); codeOf(err) != "unsafe_state_path" {
+		t.Errorf("final alias: got %v", err)
 	}
 
 	nsCases := []struct {
@@ -361,6 +368,7 @@ func TestReadRecordSafety(t *testing.T) {
 		{func() { os.Symlink(outside, final) }, "unsafe_state_path"},
 		{func() { syscall.Mkfifo(final, 0o600) }, "unsafe_state_path"},
 		{func() { os.Mkdir(final, 0o700) }, "unsafe_state_path"},
+		{func() { linkSocket(t, final) }, "unsafe_state_path"},
 		{func() { os.WriteFile(final, validData(), 0o600); os.Chmod(final, 0o644) }, "state_permissions"},
 		{func() { os.WriteFile(final, validData(), 0o600); os.Chmod(final, 0o400) }, "state_permissions"},
 		{func() { os.WriteFile(final, []byte(strings.Repeat(" ", MaxRecordBytes+1)), 0o600) }, "record_too_large"},
@@ -387,27 +395,6 @@ func TestReadRecordSafety(t *testing.T) {
 			t.Fatal("outside marker changed")
 		}
 	}
-	// A socket is rejected too (short root: socket paths are length-limited).
-	short, err := os.MkdirTemp("/tmp", "bs")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(short)
-	os.Chmod(short, 0o700)
-	os.Mkdir(filepath.Join(short, Namespace), 0o700)
-	l, err := listenUnix(filepath.Join(short, Namespace, tID+".json"))
-	if err != nil {
-		t.Fatalf("socket fixture: %v", err)
-	}
-	defer l.Close()
-	sr, err := OpenRoot(short)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := sr.Read(tID); codeOf(err) != "unsafe_state_path" {
-		t.Errorf("socket: %v", err)
-	}
-	os.RemoveAll(final)
 	r, _ = OpenRoot(dir)
 	// A valid record with a second hard link (retained staging) is accepted.
 	os.RemoveAll(final)
@@ -420,7 +407,53 @@ func TestReadRecordSafety(t *testing.T) {
 
 // --- subprocess interruption and concurrency ---
 
-func listenUnix(path string) (net.Listener, error) { return net.Listen("unix", path) }
+// socketFixtureEnv optionally names an existing closed Unix socket inode for
+// environments that cannot bind sockets. It is read by tests only.
+const socketFixtureEnv = "BAW_TEST_SOCKET_FIXTURE"
+
+// linkSocket hard-links an actual closed Unix socket inode to dst: the
+// supplied fixture if set, otherwise one created by a child of this binary.
+func linkSocket(t *testing.T, dst string) {
+	t.Helper()
+	src := os.Getenv(socketFixtureEnv)
+	if src == "" {
+		src = makeSocket(t)
+	}
+	fi, err := os.Lstat(src)
+	if err != nil || fi.Mode()&os.ModeSocket == 0 {
+		t.Fatalf("socket fixture is not a socket: %v", err)
+	}
+	if uid := fi.Sys().(*syscall.Stat_t).Uid; int(uid) != os.Getuid() {
+		t.Fatalf("socket fixture owner %d is not the current user", uid)
+	}
+	if err := os.Link(src, dst); err != nil {
+		t.Fatalf("socket fixture link: %v", err)
+	}
+	if fi, err := os.Lstat(dst); err != nil || fi.Mode()&os.ModeSocket == 0 {
+		t.Fatalf("linked fixture is not a socket: %v", err)
+	}
+}
+
+// makeSocket binds and closes a socket with a short relative name in a new
+// directory (sockaddr paths are length-limited), leaving the inode behind.
+func makeSocket(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "sock")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := child(ctx, helperEnv+"=socket")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("socket helper: %v %q", err, out)
+	}
+	if !cmd.ProcessState.Exited() {
+		t.Fatal("socket helper not joined")
+	}
+	return filepath.Join(dir, "s")
+}
 
 const helperEnv = "BAW_STATE_TEST_HELPER"
 
@@ -455,6 +488,18 @@ func TestHelperProcess(t *testing.T) {
 			os.Stdout.WriteString(string(codeOf(err)))
 		} else {
 			os.Stdout.WriteString("ok")
+		}
+		os.Exit(0)
+	case mode == "socket":
+		// Relative to the parent-chosen working directory.
+		l, err := net.Listen("unix", "s")
+		if err != nil {
+			os.Stdout.WriteString("listen: " + err.Error())
+			os.Exit(3)
+		}
+		l.(*net.UnixListener).SetUnlinkOnClose(false)
+		if err := l.Close(); err != nil {
+			os.Exit(4)
 		}
 		os.Exit(0)
 	}
@@ -504,6 +549,37 @@ func TestInterruption(t *testing.T) {
 	}
 }
 
+// race starts one creator per scope, releases them together and joins them
+// all, including on a start failure.
+func race(t *testing.T, dir string, scopes []string) []*strings.Builder {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	var cmds []*exec.Cmd
+	var outs []*strings.Builder
+	join := func() {
+		for _, c := range cmds {
+			if err := c.Wait(); err != nil {
+				t.Errorf("child: %v", err)
+			}
+		}
+	}
+	for _, s := range scopes {
+		cmd := child(ctx, helperEnv+"=race", "BAW_STATE_TEST_DIR="+dir, "BAW_STATE_TEST_SCOPE="+s)
+		var b strings.Builder
+		cmd.Stdout = &b
+		if err := cmd.Start(); err != nil {
+			cancel()
+			join()
+			t.Fatal(err)
+		}
+		cmds, outs = append(cmds, cmd), append(outs, &b)
+	}
+	os.WriteFile(dir+".go", nil, 0o600)
+	join()
+	return outs
+}
+
 func TestConcurrentCreate(t *testing.T) {
 	for _, nsPresent := range []bool{false, true} {
 		for round := 0; round < 3; round++ {
@@ -511,26 +587,8 @@ func TestConcurrentCreate(t *testing.T) {
 			if nsPresent {
 				os.Mkdir(filepath.Join(dir, Namespace), 0o700)
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			scopes := []string{strings.Repeat("a", 64), strings.Repeat("b", 64)}
-			var cmds []*exec.Cmd
-			var outs []*strings.Builder
-			for _, s := range scopes {
-				cmd := child(ctx, helperEnv+"=race", "BAW_STATE_TEST_DIR="+dir, "BAW_STATE_TEST_SCOPE="+s)
-				var b strings.Builder
-				cmd.Stdout = &b
-				if err := cmd.Start(); err != nil {
-					t.Fatal(err)
-				}
-				cmds, outs = append(cmds, cmd), append(outs, &b)
-			}
-			os.WriteFile(dir+".go", nil, 0o600)
-			for _, c := range cmds {
-				if err := c.Wait(); err != nil {
-					t.Errorf("child: %v", err)
-				}
-			}
-			cancel()
+			outs := race(t, dir, scopes)
 			res := []string{outs[0].String(), outs[1].String()}
 			winner := -1
 			for i, s := range res {

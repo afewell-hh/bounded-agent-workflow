@@ -125,6 +125,7 @@ func TestParseBoundary(t *testing.T) {
 func TestParseInvalid(t *testing.T) {
 	f := fields1()
 	huge := strings.Repeat("9", 5000)
+	esc := `\` + "u" // a JSON \u escape in the raw record bytes
 	cases := []struct {
 		name, data string
 		want       Code
@@ -137,8 +138,8 @@ func TestParseInvalid(t *testing.T) {
 		{"truncated", obj(f)[:50], "invalid_record"},
 		{"trailing comma", strings.TrimSuffix(obj(f), "}") + ",}", "invalid_record"},
 		{"duplicate key", obj(append(f, field{"run_id", `"` + tID + `"`})), "invalid_record"},
-		{"duplicate escaped key", obj(append(f, field{`run_id`, `"` + tID + `"`})), "invalid_record"},
-		{"duplicate escaped key v2", obj(append(set(f, "schema_version", "2"), field{`schema_version`, "2"})), "invalid_record"},
+		{"duplicate escaped key", obj(append(f, field{"run_" + esc + "0069d", `"` + tID + `"`})), "invalid_record"},
+		{"duplicate escaped key v2", obj(append(set(f, "schema_version", "2"), field{"schema_" + esc + "0076ersion", "2"})), "invalid_record"},
 		{"case variant key", obj(append(drop(f, "run_id"), field{"Run_ID", `"` + tID + `"`})), "invalid_record"},
 		{"missing version", obj(drop(f, "schema_version")), "invalid_record"},
 		{"version quoted", obj(set(f, "schema_version", `"1"`)), "invalid_record"},
@@ -176,6 +177,9 @@ func TestParseInvalid(t *testing.T) {
 		{"version 1 duplicate plus extra", obj(append(append(f, field{"extra", "1"}), field{"extra", "1"})), "invalid_record"},
 	}
 	for _, c := range cases {
+		if strings.Contains(c.name, "escaped") && !strings.Contains(c.data, esc+"00") {
+			t.Fatalf("%s: fixture has no JSON unicode escape", c.name)
+		}
 		r, err := Parse([]byte(c.data), tID)
 		if codeOf(err) != c.want {
 			t.Errorf("%s: got %v want %s", c.name, err, c.want)
