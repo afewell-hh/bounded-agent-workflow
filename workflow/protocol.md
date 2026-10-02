@@ -27,17 +27,24 @@ renewed approval. Do not mutate a frozen ticket body as a progress mechanism.
 1. The lead prepares one phase/ticket with enough context for a new agent.
 2. A readiness check confirms inputs, observable acceptance, scope, and verification.
 3. The operator approves that particular scope, budgets and completion mode. For routine
-   implementation this includes the defined push/PR, merge and closeout authority.
+   implementation this includes the defined push/PR, merge and closeout authority. Under
+   a valid explicit [standing delegation](../docs/operator/github-single-account.md#standing-program-delegation-opt-in),
+   the lead instead selects and freezes the ticket and records its chain (operator
+   instruction -> delegation -> lead-selected ticket) before dispatch.
 4. The worker implements only the authorized phase in its assigned workspace.
 5. Required verification runs on an identified candidate. Independent review assesses
    the original requirements, code/artifact, tests, documentation, and evidence.
 6. In-scope fixes stay in the same run lineage and finite budget. Changed requirements,
-   missing authority, unsafe state, or exhausted budget stop for the operator.
+   missing authority or unsafe state stop for the operator. An exhausted cap stops
+   dispatch; only a valid standing delegation lets the lead record a finite extension
+   instead of asking. Repeated failure without progress needs diagnosis, not retries.
 7. For routine implementation, the coordinator confirms all gates and the current
    integration context, merges through the approved protected path, verifies actual
    closeout, updates records, and closes the ticket. No per-merge human approval is needed.
-8. Report the completed result and STOP before another ticket starts. The operator may
-   authorize the identified next scope in one response. Unresolved design holds and
+8. Report the completed result and, by default, STOP before another ticket starts. The operator may
+   authorize the identified next scope in one response; under valid standing delegation
+   the lead may select the next ready in-scope ticket after recording this outcome.
+   Reserved decisions still go to the client. Unresolved design holds and
    consequential exceptions stop earlier for the specific decision, not a ritual sign-off.
 
 Use [the closeout policy](../docs/operator/github-single-account.md) for exact conditions.
@@ -46,9 +53,10 @@ containing a proposal is not an adopted product decision. Releases, deployment a
 external changes do not follow from routine integration permission.
 
 For the pilot, implementation allows one initial attempt plus at most two repair
-attempts. This is an adjustable operating choice, not an established optimum. A crash
-or replacement does not erase attempts or uncertainties. High-risk work and changes to
-the governing process remain explicitly supervised.
+attempts. This is an adjustable operating choice, not an established optimum. A crash,
+replacement, rename or successor ticket does not erase attempts or uncertainties. High-risk
+work and changes to the governing process remain explicitly supervised; a candidate
+policy never governs its own review, budget or merge.
 
 ## Durable checkpoint rule
 

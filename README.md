@@ -37,14 +37,17 @@ ADRs 0001–0003 are **Accepted** for this repository under the operator's deleg
 Their substantive decisions were adopted as written in seed revision `10425c4`.
 Adoption does not implement the controller or authorize the next implementation ticket.
 
-## Current workflow: complete the ticket, then ask what is next
+## Current workflow: complete the ticket, then (by default) ask what is next
 
 Once adopted, routine scope approval includes in-scope commit/push/PR, verified merge to
-the named non-production integration branch, record updates, and ticket closure. The
-operator's normal checkpoint is **after a completed ticket, before another starts**, not
-another code-review or merge-button task. See
+the named non-production integration branch, record updates, and ticket closure. By
+default, the operator's checkpoint is **after a completed ticket, before another starts**,
+not another code-review or merge-button task. Only an explicit, recorded
+[standing program delegation](docs/operator/github-single-account.md#standing-program-delegation-opt-in)
+lets the lead select the next ready in-scope ticket and record finite routine repair
+extensions within its stated bounds. See
 [single-account closeout](docs/operator/github-single-account.md). Release/deployment,
-production effects, governing policy, and unresolved design decisions retain specific gates.
+production effects, governing policy, and unresolved design decisions always retain specific gates.
 
 For GUI work, [rendered-interface verification](docs/developer/gui-verification.md) requires
 real interactions plus actual image inspection and independent evidence. Implementing an

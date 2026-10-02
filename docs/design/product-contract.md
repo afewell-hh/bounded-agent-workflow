@@ -37,7 +37,10 @@ Working a ticket should validate and snapshot its scope, present approval, creat
 isolated workspace, run a worker, execute required gates, review a frozen candidate,
 allow finite repair, confirm current integration requirements, merge to the approved
 non-production target, verify closeout, update records and close the ticket. Then stop
-before the next ticket. The tool manages paths, evidence and conditional merge internally;
+before the next ticket by default. A project may opt into an explicit bounded
+[standing delegation](../operator/github-single-account.md#standing-program-delegation-opt-in)
+letting the lead select the next ready ticket and finite in-scope repair extensions with a
+recorded authority chain; missing or unclear delegation fails closed. The tool manages paths, evidence and conditional merge internally;
 no per-merge human approval is needed for adopted routine scope. Named design/consequence
 holds stop for the specific decision. Releases/deployment remain separately authorized.
 
@@ -77,7 +80,8 @@ no fallback to broader credentials. A same-user process is not a strong isolatio
 The default [GitHub workflow](../operator/github-single-account.md) must operate with one
 account for operator and agents. Independent model review remains mandatory, but is not a
 required approving review by a distinct GitHub identity. Preserve actual required tests,
-human scope/next-ticket boundaries and preauthorized conditional routine merge. No separate
+human scope/next-ticket boundaries (or recorded standing delegation) and preauthorized
+conditional routine merge. No separate
 human code review or approving identity is needed for each PR. Rule changes need specific approval;
 existing unchangeable conflicts remain visible blockers. Do not ship automatic admin
 bypass, synthetic identities, or user.name-based approval tricks. Technically isolated
@@ -143,8 +147,12 @@ initial product; deliberate replacement of the binary is sufficient.
 [The closeout policy](../operator/github-single-account.md) defines complete-ticket authority,
 non-production integration versus release, exact head/base/result evidence, actual merge
 confirmation and post-merge failure handling. Persist completion mode and any human holds.
-A queue request is not a completed merge. After `COMPLETED_AWAITING_NEXT_SCOPE`, no new
-implementation is dispatched until the operator approves its identified scope. Keep budget
+A queue request is not a completed merge. After `COMPLETED_AWAITING_NEXT_SCOPE`, by default
+no new implementation is dispatched until the operator approves its identified scope. Under
+a valid [standing delegation](../operator/github-single-account.md#standing-program-delegation-opt-in)
+the lead may instead dispatch a ready, frozen, bounded in-scope ticket after recording the
+prior closeout and that ticket's scope, finite budget and authority chain; progress reports
+stay informative, not approval. Missing, revoked or out-of-scope delegation fails closed. Keep budget
 and merge/record-recovery lineage across replacements. Git rollback is not external rollback.
 
 [GUI verification](../developer/gui-verification.md) is an evidence requirement, not an

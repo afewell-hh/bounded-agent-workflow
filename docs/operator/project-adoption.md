@@ -1,7 +1,8 @@
 # Adopt the workflow in an existing or new application
 
 **Available now:** an agent-assisted, manually approved procedure. There is no automatic
-`baw init`, environment installer, or project migrator in this documentation-only seed.
+`baw init`, environment installer, or project migrator; the toolkit's only implemented
+command is the read-only [`baw inspect`](inspect.md), which grants no authority.
 This guide is for application projects. To develop the BAW tool itself, use
 [the manual bootstrap](manual-workflow.md) instead.
 
@@ -97,7 +98,9 @@ resources or serialize writes. A secret source is never task context or a build 
 
 Use [single-account GitHub](github-single-account.md) to inspect all effective rules,
 including organization and deployment settings, before proposing changes. Keep PRs,
-independent model findings, mandatory verification and scope/next-ticket checkpoints;
+independent model findings, mandatory verification and scope/next-ticket checkpoints
+(the next-ticket default changes only through an explicit, separately recorded
+[standing delegation](github-single-account.md#standing-program-delegation-opt-in));
 preauthorize conditional routine merge/closure through the named integration policy, but do not
 create a requirement for another approving GitHub identity. Existing conflicts require
 an authorized amendment or an explicit blocker. No automatic bypass or rule removal.
@@ -155,7 +158,9 @@ Under [single-account closeout](github-single-account.md), determine the actual 
 integration target, downstream workflow/webhook/hosting effects, release/consumer policy,
 mandatory head/base/post-merge gates, and exceptional human holds. Existing team constraints
 are not silently removed. Routine ticket approval then includes push/PR, verified merge
-and closure; the next-ticket checkpoint remains mandatory. Do not add another account or
+and closure; the next-ticket checkpoint remains mandatory unless the operator records an
+explicit [standing delegation](github-single-account.md#standing-program-delegation-opt-in);
+adoption alone never grants one. Do not add another account or
 operator merge prompt just to implement independent review. Unknown production effects
 must be resolved before delegating routine integration.
 

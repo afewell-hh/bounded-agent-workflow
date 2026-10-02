@@ -17,7 +17,8 @@ Markdown files are needed. All links below point to files inside this extracted 
    this package has not created it for you.
 3. Continue to **section 2** of that same document. Start a fresh Codex session inside
    the repository and paste the provided bootstrap-lead prompt. Its first pass is
-   read-only planning, not permission to implement the whole controller.
+   read-only planning, not permission to implement the whole controller. That prompt is
+   a preserved historical bootstrap step; this repository has since been established.
 
 If you already created a repository or edited earlier files, preserve that work. Do not
 rerun initialization or overwrite files blindly; have the lead inspect and reconcile the
@@ -29,14 +30,17 @@ The package includes the current protocol, role instructions, operator runbook,
 architecture proposals, issue/PR templates, and documentation/environment/access policies.
 The detailed map is in [README.md](README.md).
 
-**There is no implemented `baw` command yet.** You use your existing Git/GitHub and native
-Codex/Claude tools to develop it, coordinating messages manually as the runbook describes.
-You do not need a Python controller or a Go installation merely to read/stage the seed;
-the first implementation work establishes the actual Go build/test environment.
+**The only implemented `baw` command is the read-only [`baw inspect`](docs/operator/inspect.md);**
+it grants no authority, and other controller surfaces do not exist yet. You use your existing
+Git/GitHub and native Codex/Claude tools to develop BAW, coordinating messages manually as
+the runbook describes. You do not need a Python controller or a Go installation merely to
+read the documents; building and testing follow [developer setup](docs/developer/environment.md).
 
 For routine approved tickets, the adopted workflow includes verified non-production merge
-and ticket closure without a second human merge approval, then stops before another ticket.
-Releases, production effects, and unresolved design/policy decisions retain their own gates.
+and ticket closure without a second human merge approval, then by default stops before
+another ticket unless a recorded
+[standing delegation](docs/operator/github-single-account.md#standing-program-delegation-opt-in)
+applies. Releases, production effects, and unresolved design/policy decisions retain their own gates.
 
 ## Reuse in an application later
 

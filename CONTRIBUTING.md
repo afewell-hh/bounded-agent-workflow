@@ -1,9 +1,10 @@
 # Contributing
 
 Start with [AGENTS.md](AGENTS.md) and the [manual workflow](docs/operator/manual-workflow.md).
-The source initially contains documentation, templates, and proposed contracts only.
-There is no valid software build/test command until the first reviewed Go scaffold is
-implemented. Do not describe `go test ./...` as having passed on this initial seed.
+The source contains documentation, templates, proposed contracts and one implemented
+command, the read-only [`baw inspect`](docs/operator/inspect.md); other controller surfaces
+do not exist yet. Build and test with [developer setup](docs/developer/environment.md), and
+report only checks actually run on the identified candidate.
 
 Use a reviewed work item with a bounded outcome, base commit, relevant context,
 acceptance cases, documentation impact, and explicit stop conditions. Use an isolated
@@ -15,13 +16,14 @@ and documentation requirements are described in [verification](docs/developer/ve
 and [documentation policy](docs/developer/documentation-policy.md). A pull request must
 identify its actual evidence, limitations, and documentation changes. The operator approves
 scope and completion policy; routine scope approval includes verified merge and closeout.
-Follow [the closeout policy](docs/operator/github-single-account.md), then stop before the
-next task. Consequential exceptions and unresolved design decisions retain specific gates.
+Follow [the closeout policy](docs/operator/github-single-account.md), then by default stop
+before the next task unless a recorded
+[standing delegation](docs/operator/github-single-account.md#standing-program-delegation-opt-in)
+applies. Consequential exceptions and unresolved design decisions retain specific gates.
 
 The [developer setup guide](docs/developer/environment.md) records inspected host/tool
-facts and the proposed native Go build/test/terminal route. It becomes a tested procedure
-only after the first executable slice is exercised; no supported-version matrix is
-established yet. Prefer a single Go module and internal
+facts, the native Go build/test/terminal route and the checks actually executed for the
+first executable slice on one host; no supported-version matrix is established yet. Prefer a single Go module and internal
 packages, with tests next to the implementation and deterministic fixtures. Validate
 native CLI adapters against documented versions; do not scrape a terminal UI when a
 supported structured interface serves the requirement.

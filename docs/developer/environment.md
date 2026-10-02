@@ -138,11 +138,16 @@ uncounted staged gitlinks.
 
 A repaired candidate addresses those findings. Its worker reran the same gates
 (Git 2.39.5, including SHA-256 object-format repositories) with the stderr-warning
-wrapper described in [verification](verification.md). Exact results are in the ticket's
-run evidence. **Independent review and reproduction of the repaired candidate, the live
-read-only GitHub smoke of its binary and the operator same-binary exercise are still
-pending.** Until they complete, treat this procedure as worker-verified only. Other
-platforms have not been exercised.
+wrapper described in [verification](verification.md). For the final candidate
+`27c4e17`, the required gates passed, a fresh independent Codex review and the
+designated supplementary review passed, the authorized live read-only smoke against
+coordination issue #1 passed, and the operator ran the same binary and recorded its
+terminal output. The squash merge to `main` (`884e493`) has a tree identical to the
+reviewed candidate, and the full post-merge checks passed. Durable records:
+[closeout](https://github.com/afewell-hh/bounded-agent-workflow/issues/4#issuecomment-5927721836),
+[independent review](https://github.com/afewell-hh/bounded-agent-workflow/issues/4#issuecomment-5927493441),
+[operator exercise](https://github.com/afewell-hh/bounded-agent-workflow/issues/4#issuecomment-5927641558).
+These results cover that host only; other platforms and Git versions have not been exercised.
 
 This CLI profile applies to BAW development. Future application adopters validate their
 own environment using [project adoption](../operator/project-adoption.md), including

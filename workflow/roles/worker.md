@@ -59,5 +59,6 @@ to erase a discrepancy. Missing tools/evidence and unresolved design choices are
 
 After implementation, pause edits for independent review. The authorized coordinator may
 merge/close the fully verified routine ticket without another human approval. You cannot
-replace independent review with your own verdict, change completion mode, publish a release
-or start the next ticket. Post-review changes must be reverified before closeout.
+replace independent review with your own verdict, change completion mode, publish a release,
+extend your own attempt budget or start the next ticket, even under a standing delegation;
+those remain lead/operator records. Post-review changes must be reverified before closeout.

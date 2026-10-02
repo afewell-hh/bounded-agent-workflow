@@ -53,5 +53,6 @@ approving review or invent a second identity. Release/production authority remai
 Reviewed PR head and tested integration/base/tree/build:
 Actual resulting merge commit/method and confirmed server-side state:
 Required post-merge gates and outcome; incomplete gates remain blocked:
-Issue/coordination update, retained evidence/preview, and next-ticket STOP:
+Issue/coordination update, retained evidence/preview, and next-ticket STOP (or standing-delegation receipt link):
+Attempt counts against original/current caps and any delegated extension receipt:
 No release, production change or human visual inspection is implied by routine completion.
