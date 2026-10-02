@@ -24,7 +24,9 @@ marketplace, or generic agent-company framework in the initial scope.
 The initial useful slice is read-only environment/state inspection and assembly of a
 source-linked role context packet. Exact names are subject to the approved CLI contract.
 Illustrative eventual commands are `baw lead`, `baw lead --fresh`, `baw work 123`,
-`baw status 123`, and `baw recover 123`. None is currently implemented. A hold-resolution
+`baw status 123`, and `baw recover 123`. None is currently implemented; the existing
+`baw status --state-dir DIR --run-id ID` only displays a saved
+[run record](../operator/run-records.md), not live ticket status. A hold-resolution
 operation may be added for exceptions; a mandatory `baw accept` after every routine ticket
 is not part of the target operator experience.
 
@@ -98,6 +100,10 @@ role assignment generations, provider session IDs when available, processes, att
 budgets, and transition receipts. GitHub indexes planning and approved outcomes; local
 execution state is not a competing task manager. Conflict resolution must reconcile
 actual records rather than treating the newest summary as truth.
+
+Implemented so far: only an immutable local [run record](../operator/run-records.md) of
+supplied ticket/scope/policy references and one observed HEAD. Approval provenance,
+generations, sessions, processes, budgets, receipts and recovery remain future work.
 
 The controller can execute in a separate terminal from the lead, so replacing the lead
 need not kill controller-owned work. Persist state at meaningful boundaries so losing

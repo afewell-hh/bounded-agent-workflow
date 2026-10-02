@@ -5,6 +5,9 @@ fixed maintained onboarding documents, and optional coordination-issue metadata.
 reports observations and unknowns. It does not approve work, select a ticket, activate a
 role, reconcile authority, or recover lost work.
 
+[`baw run create`](run-records.md) reuses this inspection to record a repository's
+object format and committed HEAD; its record format and errors are documented there.
+
 ## Usage
 
 ```sh

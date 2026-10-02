@@ -4,7 +4,8 @@ Use a native Go toolchain and a local terminal for BAW's first executable slice.
 This guide adapts [execution environments](execution-environments.md) for contributors
 to this tooling repository. The module `github.com/afewell-hh/bounded-agent-workflow`
 (minimum Go 1.27.0, standard library only) provides `cmd/baw` with the read-only
-[`baw inspect`](../operator/inspect.md) command and its tests. See the last section for
+[`baw inspect`](../operator/inspect.md) command, the local
+[run-record commands](../operator/run-records.md) and their tests. See the last section for
 which checks have actually run and what remains unvalidated.
 
 ## Selected toolchain
@@ -126,6 +127,18 @@ help and staged-gitlink runs. It also runs fake-`gh` journeys (no network) for t
 stderr boundary and for descendants left by a normal exit or an output overflow, and
 records whether each descendant was gone when the binary returned.
 
+Run-record journeys use the same flags with their own new directory:
+
+```sh
+go test ./cmd/baw -run TestRunRecordBinaryJourneys -count=1 -args \
+  -baw-binary="$baw_artifact_dir/baw" -journey-dir=NEW_EVIDENCE_DIR/run-record-journeys
+```
+
+It creates a new `0700` state root, dummy SHA-1 and SHA-256 repositories (an unavailable
+SHA-256 fixture fails the test), and records in `summary.txt` the help, usage, create,
+status, duplicate, opposite-width, corrupt-record and documentation-example runs, plus
+status with the repositories removed and only marker-writing fake `git`/`gh` on `PATH`.
+
 ## Checks actually executed and remaining validation
 
 For the first `baw inspect` candidate, the implementation worker's own run of gofmt,
@@ -148,6 +161,14 @@ reviewed candidate, and the full post-merge checks passed. Durable records:
 [independent review](https://github.com/afewell-hh/bounded-agent-workflow/issues/4#issuecomment-5927493441),
 [operator exercise](https://github.com/afewell-hh/bounded-agent-workflow/issues/4#issuecomment-5927641558).
 These results cover that host only; other platforms and Git versions have not been exercised.
+
+For the run-record commands, a filesystem probe on this host's APFS volume first
+observed `0700`/`0600` modes, successful `os.File.Sync` on root, namespace and file, and
+an exclusive hard link that left an existing name unchanged (link count 2). The
+implementation worker's own run of gofmt, tests, vet, build, `go version -m`, SHA-256,
+`TestBinaryJourneys` and `TestRunRecordBinaryJourneys` then passed for the uncommitted
+candidate. That is the worker's result only: independent review of the candidate is
+still pending, and nothing has been merged on the strength of it.
 
 This CLI profile applies to BAW development. Future application adopters validate their
 own environment using [project adoption](../operator/project-adoption.md), including
