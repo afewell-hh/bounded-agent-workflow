@@ -141,20 +141,27 @@ status with the repositories removed and only marker-writing fake `git`/`gh` on 
 
 ### Socket fixture
 
-`internal/state` checks that status rejects a Unix socket at the record path. Without
-extra setup, the test runs a child of its own test binary in a new test-owned directory
-under `TMPDIR`; the child binds a socket with the short relative name `s`, closes it
-without unlinking and exits, and the test waits for it. The test then hard-links that
-closed inode to the record path and confirms it is a socket before reading. No listener
-remains and the test process's working directory is unchanged.
+`TestReadSocketRecordSafety` in `internal/state` checks that status rejects an actual
+Unix socket at the record path. Without extra setup, the test creates its own `0700`
+state root and `0700` `records-v1` namespace under `TMPDIR`, then runs a child of its own
+test binary with the namespace as working directory. The child binds a socket at the
+short relative record name `00112233445566778899aabbccddeeff.json`, closes it without
+unlinking and exits; the test waits for it under a timeout. No listener remains and the
+test process's working directory is unchanged.
 
-Where socket bind is denied, set `BAW_TEST_SOCKET_FIXTURE` for the test command only, to
-an existing closed Unix socket inode owned by the current user, outside the checkout and
-on the same filesystem as `TMPDIR`. The test checks its type and owner, hard-links it into
-its own temporary directory and fails, never skips, if the fixture is missing, of another
-type, owned by someone else or cannot be linked. Only tests read this variable; `baw`
+Where socket bind is denied, set `BAW_TEST_SOCKET_STATE_DIR` for the test command only,
+to a complete existing state root outside the checkout: a `0700` root and `0700`
+`records-v1` namespace owned by the current user, with a closed Unix socket owned by the
+current user at `records-v1/00112233445566778899aabbccddeeff.json`. The test only reads
+it: it opens the root, checks the namespace and the socket's type and owner, reads that
+ID expecting `unsafe_state_path`, and confirms the root's listing and the fixed metadata
+(mode, owner, inode, link count, size, modification time) of root, namespace and socket
+are unchanged. It never binds, links, changes modes, creates or removes anything there.
+It fails, never skips or falls back, if the root, namespace or socket is missing,
+of another type or mode, or owned by someone else. Only tests read this variable; `baw`
 does not. Creating the fixture needs one bind in a directory you own, for example by a
 host process outside the restricted environment; it is test data, not a running service.
+The Go toolchain, offline settings and sandbox permissions are the same as above.
 
 ## Checks actually executed and remaining validation
 
@@ -188,9 +195,11 @@ candidate. That was the worker's result only, not independent review or acceptan
 The first independent review of the committed candidate then observed the full
 `go test` fail in a managed sandbox that denies Unix-socket bind: the socket-rejection
 test created its socket by listening at the record path. It also found two tests creating
-directories under `/tmp` instead of `TMPDIR`. The fixtures were reworked as described in
-[socket fixture](#socket-fixture). Review, gate and integration results for this slice are
-recorded on [ticket #9](https://github.com/afewell-hh/bounded-agent-workflow/issues/9),
+directories under `/tmp` instead of `TMPDIR`. A second independent review then observed
+the full `go test` fail in its sandbox when the test hard-linked a supplied closed socket
+inode into its own directory (`operation not permitted`). The fixtures were reworked
+again as described in [socket fixture](#socket-fixture). Review, gate and integration
+results for this slice are recorded on [ticket #9](https://github.com/afewell-hh/bounded-agent-workflow/issues/9),
 which indexes its run evidence.
 
 This CLI profile applies to BAW development. Future application adopters validate their

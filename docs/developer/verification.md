@@ -80,9 +80,11 @@ unavailable SHA-256 fixture fails rather than skips.
   before and after publication; and bounded concurrent same-ID creators from absent and
   present namespaces (one success, one `record_exists`, winner's data intact), all
   joined, including after a failed child start. Escaped-duplicate fixtures contain actual
-  JSON `\u` escapes. The socket case links a real closed socket inode, created by a
-  joined child or supplied by `BAW_TEST_SOCKET_FIXTURE`
-  ([socket fixture](environment.md#socket-fixture)); a missing or invalid fixture fails.
+  JSON `\u` escapes. A separate socket test reads a real closed socket at the record
+  path of a state root that a joined child creates, or of a complete read-only root
+  supplied by `BAW_TEST_SOCKET_STATE_DIR`
+  ([socket fixture](environment.md#socket-fixture)), and checks the supplied root is
+  unchanged; a missing or invalid supplied root fails.
 - `internal/cli`: both object formats via a subdirectory with uppercase input, dirty and
   secret-bearing worktrees, nonexistent policy references, opposite widths, unborn and
   inspection failures leaving the root unchanged, repeat status, duplicates, status with
@@ -94,7 +96,8 @@ unavailable SHA-256 fixture fails rather than skips.
 Not covered: hardware or power-loss durability, platforms/filesystems other than this
 host's macOS APFS, and hostile same-user changes to the state directory during a run.
 The first committed candidate's independent review observed the full suite fail where
-socket bind was denied, and two tests writing under `/tmp`; the fixtures were reworked.
+socket bind was denied, and two tests writing under `/tmp`; the next review observed it
+fail where hard-linking a supplied socket was denied. The fixtures were reworked.
 Gate and review history for this slice is summarized in
 [developer setup](environment.md#checks-actually-executed-and-remaining-validation),
 with detailed results in the ticket's run evidence.

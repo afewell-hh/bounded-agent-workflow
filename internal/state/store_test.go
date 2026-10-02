@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net"
 	"os"
@@ -368,7 +369,6 @@ func TestReadRecordSafety(t *testing.T) {
 		{func() { os.Symlink(outside, final) }, "unsafe_state_path"},
 		{func() { syscall.Mkfifo(final, 0o600) }, "unsafe_state_path"},
 		{func() { os.Mkdir(final, 0o700) }, "unsafe_state_path"},
-		{func() { linkSocket(t, final) }, "unsafe_state_path"},
 		{func() { os.WriteFile(final, validData(), 0o600); os.Chmod(final, 0o644) }, "state_permissions"},
 		{func() { os.WriteFile(final, validData(), 0o600); os.Chmod(final, 0o400) }, "state_permissions"},
 		{func() { os.WriteFile(final, []byte(strings.Repeat(" ", MaxRecordBytes+1)), 0o600) }, "record_too_large"},
@@ -405,55 +405,93 @@ func TestReadRecordSafety(t *testing.T) {
 	}
 }
 
-// --- subprocess interruption and concurrency ---
+// socketStateEnv optionally names a complete existing state root whose tID
+// record path is a closed Unix socket, for environments that cannot bind
+// sockets. It is read by tests only and never modified.
+const socketStateEnv = "BAW_TEST_SOCKET_STATE_DIR"
 
-// socketFixtureEnv optionally names an existing closed Unix socket inode for
-// environments that cannot bind sockets. It is read by tests only.
-const socketFixtureEnv = "BAW_TEST_SOCKET_FIXTURE"
-
-// linkSocket hard-links an actual closed Unix socket inode to dst: the
-// supplied fixture if set, otherwise one created by a child of this binary.
-func linkSocket(t *testing.T, dst string) {
-	t.Helper()
-	src := os.Getenv(socketFixtureEnv)
-	if src == "" {
-		src = makeSocket(t)
+// TestReadSocketRecordSafety checks that status rejects an actual Unix socket
+// at the record path, using the supplied state root if set, otherwise one
+// created here. A missing or invalid supplied root fails.
+func TestReadSocketRecordSafety(t *testing.T) {
+	dir := os.Getenv(socketStateEnv)
+	if dir == "" {
+		dir = makeSocketState(t)
 	}
-	fi, err := os.Lstat(src)
-	if err != nil || fi.Mode()&os.ModeSocket == 0 {
+	ns := filepath.Join(dir, Namespace)
+	final := filepath.Join(ns, tID+".json")
+	// meta records fixed metadata of the root, namespace and record path.
+	meta := func() string {
+		t.Helper()
+		var lines []string
+		for _, p := range []string{dir, ns, final} {
+			fi, err := os.Lstat(p)
+			if err != nil {
+				t.Fatalf("socket state fixture: %v", err)
+			}
+			st := fi.Sys().(*syscall.Stat_t)
+			lines = append(lines, fmt.Sprintf("%s %v uid=%d ino=%d nlink=%d size=%d mtime=%d",
+				p, fi.Mode(), st.Uid, st.Ino, st.Nlink, fi.Size(), fi.ModTime().UnixNano()))
+		}
+		return strings.Join(lines, "\n")
+	}
+	beforeMeta, before := meta(), snapshot(t, dir)
+	r, err := OpenRoot(dir)
+	if err != nil {
+		t.Fatalf("socket state root: %v", err)
+	}
+	if fi, err := os.Lstat(ns); err != nil || !fi.IsDir() || !private(fi, 0o700) {
+		t.Fatalf("socket state namespace is not a private directory: %v", err)
+	}
+	fi, err := os.Lstat(final)
+	if err != nil || fi.Mode().Type() != os.ModeSocket {
 		t.Fatalf("socket fixture is not a socket: %v", err)
 	}
 	if uid := fi.Sys().(*syscall.Stat_t).Uid; int(uid) != os.Getuid() {
 		t.Fatalf("socket fixture owner %d is not the current user", uid)
 	}
-	if err := os.Link(src, dst); err != nil {
-		t.Fatalf("socket fixture link: %v", err)
+	done := make(chan error, 1)
+	go func() { _, err := r.Read(tID); done <- err }()
+	select {
+	case err := <-done:
+		if codeOf(err) != "unsafe_state_path" {
+			t.Errorf("socket record: got %v want unsafe_state_path", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("socket record read blocked")
 	}
-	if fi, err := os.Lstat(dst); err != nil || fi.Mode()&os.ModeSocket == 0 {
-		t.Fatalf("linked fixture is not a socket: %v", err)
+	if meta() != beforeMeta || snapshot(t, dir) != before {
+		t.Error("socket state fixture changed")
 	}
 }
 
-// makeSocket binds and closes a socket with a short relative name in a new
-// directory (sockaddr paths are length-limited), leaving the inode behind.
-func makeSocket(t *testing.T) string {
+// makeSocketState returns a new state root whose record path is a closed
+// socket, bound by a joined child of this binary using the short relative
+// record name (sockaddr paths are length-limited) and left behind on close.
+func makeSocketState(t *testing.T) string {
 	t.Helper()
-	dir := filepath.Join(t.TempDir(), "sock")
-	if err := os.Mkdir(dir, 0o700); err != nil {
+	dir := newRoot(t)
+	ns := filepath.Join(dir, Namespace)
+	if err := os.Mkdir(ns, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(ns, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	cmd := child(ctx, helperEnv+"=socket")
-	cmd.Dir = dir
+	cmd.Dir = ns
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("socket helper: %v %q", err, out)
 	}
 	if !cmd.ProcessState.Exited() {
 		t.Fatal("socket helper not joined")
 	}
-	return filepath.Join(dir, "s")
+	return dir
 }
+
+// --- subprocess interruption and concurrency ---
 
 const helperEnv = "BAW_STATE_TEST_HELPER"
 
@@ -492,7 +530,7 @@ func TestHelperProcess(t *testing.T) {
 		os.Exit(0)
 	case mode == "socket":
 		// Relative to the parent-chosen working directory.
-		l, err := net.Listen("unix", "s")
+		l, err := net.Listen("unix", tID+".json")
 		if err != nil {
 			os.Stdout.WriteString("listen: " + err.Error())
 			os.Exit(3)
