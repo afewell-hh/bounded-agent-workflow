@@ -2,16 +2,19 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/afewell-hh/bounded-agent-workflow/internal/state"
 	tf "github.com/afewell-hh/bounded-agent-workflow/internal/testfixture"
@@ -89,14 +92,95 @@ func checkDiagJSONShape(t *testing.T, out string) {
 	}
 }
 
+// Child processes: diagnosis of real saved data (including FIFOs and other
+// special entries) runs Run in a child of this test binary, bounded to 10
+// seconds and always waited for, so a blocked open cannot outlive the test.
+const (
+	cliDiagChildEnv     = "BAW_CLI_TEST_DIAG_ARGS" // JSON array of Run arguments
+	cliDiagResultPrefix = "CLI-DIAG-RESULT "
+)
+
+type cliDiagResult struct {
+	Code           int
+	Stdout, Stderr string
+}
+
+// TestRunDiagnoseChildProcess is executed only as a child of this test binary.
+func TestRunDiagnoseChildProcess(t *testing.T) {
+	spec := os.Getenv(cliDiagChildEnv)
+	if spec == "" {
+		return
+	}
+	var args []string
+	if err := json.Unmarshal([]byte(spec), &args); err != nil || len(args) < 2 || args[0] != "run" || args[1] != "diagnose" {
+		t.Fatalf("bad child arguments %q: %v", spec, err)
+	}
+	var out, errb bytes.Buffer
+	code := Run(args, &out, &errb)
+	b, err := json.Marshal(cliDiagResult{code, out.String(), errb.String()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Printf("\n%s%s\n", cliDiagResultPrefix, b)
+}
+
+// cappedOutput keeps at most 64 KiB and never blocks or fails the writer.
+type cappedOutput struct{ b bytes.Buffer }
+
+func (c *cappedOutput) Write(p []byte) (int, error) {
+	if room := 1<<16 - c.b.Len(); room > 0 {
+		c.b.Write(p[:min(len(p), room)])
+	}
+	return len(p), nil
+}
+
+// runDiagChild runs `baw run diagnose` with args in a joined child of this
+// test binary under the current environment and returns its exact result.
+func runDiagChild(t *testing.T, args ...string) result {
+	t.Helper()
+	args = append([]string{"run", "diagnose"}, args...)
+	spec, err := json.Marshal(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exe := os.Args[0]
+	if !filepath.IsAbs(exe) {
+		t.Fatalf("test binary path %q is not absolute", exe)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, exe, "-test.run=^TestRunDiagnoseChildProcess$", "-test.count=1")
+	cmd.Env = append(os.Environ(), cliDiagChildEnv+"="+string(spec))
+	cmd.WaitDelay = time.Second
+	var out, errb cappedOutput
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	start := time.Now()
+	err = cmd.Run() // waits for the child also when it is killed at the deadline
+	elapsed := time.Since(start)
+	if ctx.Err() != nil {
+		t.Fatalf("diagnose child %q not finished within 10s; killed and joined after %v (%v)\nstdout %q\nstderr %q",
+			args, elapsed, err, out.b.String(), errb.b.String())
+	}
+	if err != nil {
+		t.Fatalf("diagnose child %q: %v after %v\nstdout %q\nstderr %q", args, err, elapsed, out.b.String(), errb.b.String())
+	}
+	_, res, ok := strings.Cut(out.b.String(), cliDiagResultPrefix)
+	res, _, _ = strings.Cut(res, "\n")
+	var r cliDiagResult
+	if !ok || json.Unmarshal([]byte(res), &r) != nil {
+		t.Fatalf("diagnose child %q reported no result: %q", args, out.b.String())
+	}
+	return result{r.Code, r.Stdout, r.Stderr}
+}
+
 func wantDiag(t *testing.T, root, id, ns, final string, c [6]int) {
 	t.Helper()
 	before := diagMeta(t, root)
-	r := runCLI(t, nil, "run", "diagnose", "--state-dir", root, "--run-id", id)
+	r := runDiagChild(t, "--state-dir", root, "--run-id", id)
 	if r.code != 0 || r.stderr != "" || r.stdout != diagText(id, ns, final, c) {
 		t.Fatalf("text: exit %d %q %q", r.code, r.stdout, r.stderr)
 	}
-	r = runCLI(t, nil, "run", "diagnose", "--state-dir="+root, "--json", "--run-id="+id)
+	r = runDiagChild(t, "--state-dir="+root, "--json", "--run-id="+id)
 	if r.code != 0 || r.stderr != "" || r.stdout != diagJSON(id, ns, final, c) {
 		t.Fatalf("json: exit %d %q %q", r.code, r.stdout, r.stderr)
 	}
@@ -198,7 +282,7 @@ func TestRunDiagnoseBothFormats(t *testing.T) {
 			// Leakage: no stored references, names, suffixes, paths or HEAD.
 			for _, id := range []string{rrID, rrID2} {
 				for _, extra := range [][]string{nil, {"--json"}} {
-					r := runCLI(t, nil, append([]string{"run", "diagnose", "--state-dir", root, "--run-id", id}, extra...)...)
+					r := runDiagChild(t, append([]string{"--state-dir", root, "--run-id", id}, extra...)...)
 					for _, s := range []string{"sparrow", "indigo", "6061", secretScope, policy, head, root, ".pending", "ffffffff",
 						strings.TrimPrefix(filepath.Base(staging), ".pending-"+rrID+"-"), "manual receipt", "202"} {
 						if strings.Contains(r.stdout+r.stderr, s) {
@@ -261,7 +345,7 @@ func TestRunDiagnoseStateErrors(t *testing.T) {
 		{open, "state_permissions"}, {link, "unsafe_state_path"}, {link + "/", "unsafe_state_path"},
 	} {
 		for _, extra := range [][]string{nil, {"--json"}} {
-			wantFail(t, runCLI(t, nil, append([]string{"run", "diagnose", "--state-dir", c.dir, "--run-id", rrID}, extra...)...), 1, c.code)
+			wantFail(t, runDiagChild(t, append([]string{"--state-dir", c.dir, "--run-id", rrID}, extra...)...), 1, c.code)
 		}
 	}
 	// An ancestor alias is resolved while the final component is checked.
@@ -309,7 +393,7 @@ func TestRunDiagnoseStateErrors(t *testing.T) {
 	} {
 		root := nsCase(c.setup)
 		before := diagMeta(t, root)
-		r := runCLI(t, nil, "run", "diagnose", "--state-dir", root, "--run-id", rrID, "--json")
+		r := runDiagChild(t, "--state-dir", root, "--run-id", rrID, "--json")
 		wantFail(t, r, 1, c.code)
 		if strings.Contains(r.stderr, "dummy-secret") || diagMeta(t, root) != before {
 			t.Fatal("leak or change")

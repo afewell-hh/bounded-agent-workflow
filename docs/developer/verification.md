@@ -140,7 +140,9 @@ artifact (SHA-1 and SHA-256, text and JSON, no skips).
   usage precedence before filesystem access, root/namespace/entry failures, every fatal
   code's exit/stdout/stderr (through a test-only replacement of the storage call),
   failing/short/prefix-then-error stdout for report and help, failing stderr, and the
-  shared 4096/4097-byte bounded-output helper with synthetic buffers.
+  shared 4096/4097-byte bounded-output helper with synthetic buffers. Every diagnosis of
+  saved data, including the FIFO cases, runs in a child of the test binary bounded to
+  10 seconds and always waited for; a timeout fails with the child's captured output.
 
 Not covered: other users' files (ownership tests use the current user only), other
 platforms, hostile same-user changes beyond the deterministic boundaries above, and any
