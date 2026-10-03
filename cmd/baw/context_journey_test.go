@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -98,15 +99,23 @@ func TestContextBinaryJourneys(t *testing.T) {
 	env := append(os.Environ(), "PATH="+fakeDir+":"+os.Getenv("PATH"), "GIT_DIR=/nonexistent-decoy/.git",
 		"GIT_WORK_TREE=/nonexistent-decoy", "GIT_INDEX_FILE=/nonexistent-decoy/index")
 
+	// Every binary call, including the unsafe-source ones, is killed and
+	// always waited for within 10 seconds.
 	var summary strings.Builder
 	run := func(name string, wantCode int, args ...string) (string, string) {
 		t.Helper()
-		cmd := exec.Command(*bawBinary, args...)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, *bawBinary, args...)
 		cmd.Env = env
+		cmd.WaitDelay = time.Second
 		var out, errb strings.Builder
 		cmd.Stdout, cmd.Stderr = &out, &errb
 		start := time.Now()
-		err := cmd.Run()
+		err := cmd.Run() // waits for the child also when it is killed at the deadline
+		if ctx.Err() != nil {
+			t.Fatalf("%s: not finished within 10s; killed and joined after %v (%v)", name, time.Since(start), err)
+		}
 		code := 0
 		if ee, ok := err.(*exec.ExitError); ok {
 			code = ee.ExitCode()

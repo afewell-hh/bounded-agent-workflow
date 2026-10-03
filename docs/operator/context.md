@@ -153,8 +153,11 @@ mutable location, not frozen content.
 
 ### Failures
 
-Exit 1 prints nothing on stdout and `baw: CODE` on stderr (best effort; a failing stderr
-keeps the exit status). Exit 2 is `baw: invalid_usage`. No partial packet is printed.
+A failure prints the fixed `baw: CODE` on stderr (best effort; a failing stderr keeps the
+exit status). Exit 2 is `baw: invalid_usage`. Every failure detected before delivery,
+including `output_limit`, leaves stdout empty. Only `output_unavailable` happens during
+delivery: the failing stdout may already hold a prefix of the packet or help, which cannot
+be withdrawn.
 Repository, Git, source and limit failures use [inspect's codes and order](inspect.md#failures),
 for example `repository_unavailable`, `unsupported_filters`, `unsupported_partial_clone`,
 `source_symlink` (a context source or one of its directories is a symlink) and

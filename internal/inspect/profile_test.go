@@ -1,11 +1,17 @@
 package inspect
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Hand-written oracles, deliberately not derived from production tables.
@@ -108,19 +114,100 @@ func TestMissingTrackedWithoutStatusIsUnknown(t *testing.T) {
 		t.Fatalf("index only: %+v %v", got, err)
 	}
 	// Only the requested paths are probed: an unsafe unrequested sibling is
-	// never examined.
+	// never examined. The real unsafe probes run in a bounded, joined child.
 	if err := os.MkdirAll(filepath.Join(top, "workflow/roles"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink("/nonexistent", filepath.Join(top, "workflow/roles/lead.md")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := inspectSources(top, head, []string{path}, both, both, nil); err != nil {
-		t.Fatalf("unselected sibling probed: %v", err)
+	r := runProfileChild(t, top, head)
+	if r.Unselected != "" {
+		t.Fatalf("unselected sibling probed: %v", r.Unselected)
 	}
-	if _, err := inspectSources(top, head, []string{"workflow/roles/lead.md"}, nil, nil, nil); err == nil || err.(*Error).Code != CodeSourceSymlink {
-		t.Fatalf("selected symlink: %v", err)
+	if r.Selected != string(CodeSourceSymlink) {
+		t.Fatalf("selected symlink: %q", r.Selected)
 	}
+}
+
+const (
+	profileChildEnv    = "BAW_INSPECT_TEST_PROFILE_CHILD" // JSON [top, head]
+	profileChildPrefix = "BAW-PROFILE-CHILD-RESULT "
+)
+
+// profileChildResult holds each probe's error ("" for none, a Code, or
+// "unexpected: ..." for any other error).
+type profileChildResult struct {
+	Unselected string
+	Selected   string
+}
+
+func probeError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if e, ok := err.(*Error); ok {
+		return string(e.Code)
+	}
+	return "unexpected: " + err.Error()
+}
+
+// TestProfileChildProcess is executed only as a child of this test binary.
+// It probes an unrequested and then a requested unsafe role path.
+func TestProfileChildProcess(t *testing.T) {
+	spec := os.Getenv(profileChildEnv)
+	if spec == "" {
+		return
+	}
+	var args []string
+	if err := json.Unmarshal([]byte(spec), &args); err != nil || len(args) != 2 {
+		t.Fatalf("bad child arguments %q: %v", spec, err)
+	}
+	top, head := args[0], args[1]
+	both := map[string]bool{"workflow/roles/worker.md": true}
+	_, unselected := inspectSources(top, head, []string{"workflow/roles/worker.md"}, both, both, nil)
+	_, selected := inspectSources(top, head, []string{"workflow/roles/lead.md"}, nil, nil, nil)
+	b, err := json.Marshal(profileChildResult{probeError(unselected), probeError(selected)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Printf("\n%s%s\n", profileChildPrefix, b)
+}
+
+// runProfileChild runs the probes in a child of this test binary, killed and
+// always waited for within 10 seconds.
+func runProfileChild(t *testing.T, top, head string) profileChildResult {
+	t.Helper()
+	spec, err := json.Marshal([]string{top, head})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exe := os.Args[0]
+	if !filepath.IsAbs(exe) {
+		t.Fatalf("test binary path %q is not absolute", exe)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, exe, "-test.run=^TestProfileChildProcess$", "-test.count=1")
+	cmd.Env = append(os.Environ(), profileChildEnv+"="+string(spec))
+	cmd.WaitDelay = time.Second
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	start := time.Now()
+	err = cmd.Run() // waits for the child also when it is killed at the deadline
+	if ctx.Err() != nil {
+		t.Fatalf("profile child not finished within 10s; killed and joined after %v (%v)", time.Since(start), err)
+	}
+	if err != nil {
+		t.Fatalf("profile child: %v\nstdout %q\nstderr %q", err, out.String(), errb.String())
+	}
+	_, res, ok := strings.Cut(out.String(), profileChildPrefix)
+	res, _, _ = strings.Cut(res, "\n")
+	var r profileChildResult
+	if !ok || json.Unmarshal([]byte(res), &r) != nil {
+		t.Fatalf("profile child reported no result: %q", out.String())
+	}
+	return r
 }
 
 func sp(s string) *string { return &s }
