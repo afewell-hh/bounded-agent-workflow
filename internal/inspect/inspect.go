@@ -84,6 +84,11 @@ var hexRE = regexp.MustCompile(`^[0-9a-f]+$`)
 // Inspect performs the read-only inspection. It returns either a complete
 // packet or a fixed-code error; partial packets are never returned.
 func Inspect(opts Options) (*Packet, error) {
+	return inspect(opts, legacyProfile())
+}
+
+// inspect is Inspect with the maintained sources taken from prof.
+func inspect(opts Options, prof sourceProfile) (*Packet, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), opts.Limits.Total)
 	defer cancel()
 
@@ -173,7 +178,7 @@ func Inspect(opts Options) (*Packet, error) {
 	if err != nil {
 		return nil, err
 	}
-	st, err := parseStatus(statusOut)
+	st, err := parseStatus(statusOut, prof.member)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +191,7 @@ func Inspect(opts Options) (*Packet, error) {
 	if err != nil {
 		return nil, err
 	}
-	idx, err := parseIndex(indexOut, width)
+	idx, err := parseIndex(indexOut, width, prof.member)
 	if err != nil {
 		return nil, err
 	}
@@ -197,7 +202,7 @@ func Inspect(opts Options) (*Packet, error) {
 		if err != nil {
 			return nil, err
 		}
-		headEntries, headFiles, err = parseTree(out, width)
+		headEntries, headFiles, err = parseTree(out, width, prof.member)
 		if err != nil {
 			return nil, err
 		}
@@ -261,7 +266,7 @@ func Inspect(opts Options) (*Packet, error) {
 	}
 
 	// Sources.
-	sources, err := inspectSources(top, head, headFiles, idx.indexed, st.paths)
+	sources, err := inspectSources(top, head, prof.paths, headFiles, idx.indexed, st.paths)
 	if err != nil {
 		return nil, err
 	}

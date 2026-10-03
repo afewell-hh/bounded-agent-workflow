@@ -5,7 +5,8 @@ This guide adapts [execution environments](execution-environments.md) for contri
 to this tooling repository. The module `github.com/afewell-hh/bounded-agent-workflow`
 (minimum Go 1.27.0, standard library only) provides `cmd/baw` with the read-only
 [`baw inspect`](../operator/inspect.md) command, the local
-[run-record commands](../operator/run-records.md) and their tests. See the last section for
+[run-record commands](../operator/run-records.md), the read-only
+[`baw context`](../operator/context.md) command and their tests. See the last section for
 which checks have actually run and what remains unvalidated.
 
 ## Selected toolchain
@@ -156,6 +157,22 @@ count, size and modification time (not access time) must be unchanged. It also r
 usage, FIFO/symlink/mode failures and the documentation example, recording all in
 `summary.txt`.
 
+Context journeys use the same flags with their own new directory:
+
+```sh
+go test ./cmd/baw -run '^TestContextBinaryJourneys$' -count=1 -v -args \
+  -baw-binary="$baw_artifact_dir/baw" -journey-dir=NEW_EVIDENCE_DIR/context-journeys
+```
+
+It compares `baw context` text and JSON for all three roles in SHA-1 and SHA-256 fixtures
+(12 success combinations; an unavailable SHA-256 fixture fails the test) with exact
+hand-written output, repeats each from a subdirectory, runs help and usage, repository and
+symlink failures with a fake `gh` that must never run, and performs the
+[documentation example](../operator/context.md#how-to-hand-a-role-its-reading-list-and-follow-the-references),
+checking the documented output and following its references, recording all in
+`summary.txt`. Without both flags the journey test is skipped, which is not a result:
+check that the `-v` output shows `--- PASS: TestContextBinaryJourneys`.
+
 ### Socket fixture
 
 `TestReadSocketRecordSafety` in `internal/state` checks that status rejects an actual
@@ -253,6 +270,13 @@ identity fixtures without independent inode facts. The tests were reworked as de
 in [verification](verification.md#implemented-slice-gates-run-diagnose) and
 [special-bit fixture](#special-bit-fixture). Review, gate and integration results are
 recorded on [ticket #12](https://github.com/afewell-hh/bounded-agent-workflow/issues/12).
+
+For `baw context`, the gates in [verification](verification.md#implemented-slice-gates-context)
+are first run by the implementation worker in a restricted native sandbox using the
+supplied socket and special-bit fixtures; that is the worker's claim only. Independent
+review, default host gates (both fixture variables unset), integration and closeout
+results are recorded on the implementation ticket
+([#15](https://github.com/afewell-hh/bounded-agent-workflow/issues/15)), not here.
 
 This CLI profile applies to BAW development. Future application adopters validate their
 own environment using [project adoption](../operator/project-adoption.md), including

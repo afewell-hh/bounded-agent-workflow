@@ -17,7 +17,7 @@ const (
 
 type statusResult struct {
 	staged, unstaged, untracked, conflicted int
-	paths                                   map[string]statusKind // only allowlisted paths
+	paths                                   map[string]statusKind // only profile member paths
 	unmerged                                map[string]bool       // every path of a `u` record
 }
 
@@ -52,8 +52,10 @@ func validXY(xy string) bool {
 	return true
 }
 
-// parseStatus parses `git status --porcelain=v2 -z` without headers.
-func parseStatus(out []byte) (statusResult, error) {
+// parseStatus parses `git status --porcelain=v2 -z` without headers. Path
+// states are kept only for members of the request's source profile; counts
+// cover every record.
+func parseStatus(out []byte, member map[string]bool) (statusResult, error) {
 	r := statusResult{paths: map[string]statusKind{}, unmerged: map[string]bool{}}
 	if len(out) == 0 {
 		return r, nil
@@ -97,7 +99,7 @@ func parseStatus(out []byte) (statusResult, error) {
 			if f[1][1] != '.' && f[4] != gitlinkMode {
 				r.unstaged++
 			}
-			if allowlisted[path] && f[1] != ".." {
+			if member[path] && f[1] != ".." {
 				r.paths[path] = kindChanged
 			}
 		case 'u':
@@ -107,12 +109,12 @@ func parseStatus(out []byte) (statusResult, error) {
 			}
 			r.conflicted++
 			r.unmerged[p] = true
-			if allowlisted[p] {
+			if member[p] {
 				r.paths[p] = kindConflict
 			}
 		case '?':
 			r.untracked++
-			if p := rec[2:]; allowlisted[p] {
+			if p := rec[2:]; member[p] {
 				r.paths[p] = kindUntracked
 			}
 		case '!':
@@ -132,13 +134,13 @@ type indexResult struct {
 	stage0   map[string]entry
 	unmerged map[string]bool // paths with any stage 1-3 entry
 	gitlinks int             // stage-0 gitlinks
-	indexed  map[string]bool // allowlisted paths with any index entry
+	indexed  map[string]bool // profile member paths with any index entry
 }
 
 func validOID(s string, width int) bool { return len(s) == width && hexRE.MatchString(s) }
 
 // parseIndex parses `git ls-files --stage -z` ("MODE OID STAGE\tPATH").
-func parseIndex(out []byte, width int) (indexResult, error) {
+func parseIndex(out []byte, width int, member map[string]bool) (indexResult, error) {
 	r := indexResult{stage0: map[string]entry{}, unmerged: map[string]bool{}, indexed: map[string]bool{}}
 	if len(out) == 0 {
 		return r, nil
@@ -164,7 +166,7 @@ func parseIndex(out []byte, width int) (indexResult, error) {
 		} else {
 			r.unmerged[p] = true
 		}
-		if allowlisted[p] {
+		if member[p] {
 			r.indexed[p] = true
 		}
 	}
@@ -223,8 +225,8 @@ func countWorktrees(out []byte) (int, error) {
 }
 
 // parseTree parses `git ls-tree -r -z --full-tree` ("MODE TYPE OID\tPATH").
-// It returns every entry and the allowlisted paths that are regular files.
-func parseTree(out []byte, width int) (map[string]entry, map[string]bool, error) {
+// It returns every entry and the profile member paths that are regular files.
+func parseTree(out []byte, width int, member map[string]bool) (map[string]entry, map[string]bool, error) {
 	entries := map[string]entry{}
 	files := map[string]bool{}
 	if len(out) == 0 {
@@ -244,7 +246,7 @@ func parseTree(out []byte, width int) (map[string]entry, map[string]bool, error)
 		}
 		p := string(rec[tab+1:])
 		entries[p] = entry{meta[0], meta[2]}
-		if allowlisted[p] && meta[1] == "blob" && (meta[0] == "100644" || meta[0] == "100755") {
+		if member[p] && meta[1] == "blob" && (meta[0] == "100644" || meta[0] == "100755") {
 			files[p] = true
 		}
 	}
@@ -281,9 +283,10 @@ func probeSource(top, rel string) (bool, error) {
 	return true, nil
 }
 
-func inspectSources(top, head string, headFiles, indexed map[string]bool, status map[string]statusKind) ([]Source, error) {
+// inspectSources probes and classifies exactly paths, the request's profile.
+func inspectSources(top, head string, paths []string, headFiles, indexed map[string]bool, status map[string]statusKind) ([]Source, error) {
 	var out []Source
-	for _, rel := range SourcePaths {
+	for _, rel := range paths {
 		present, err := probeSource(top, rel)
 		if err != nil {
 			return nil, err

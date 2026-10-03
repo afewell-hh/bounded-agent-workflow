@@ -30,6 +30,8 @@ docs/                    Operator, developer, design, and architecture documenta
 Implemented so far: `cmd/baw`, `internal/cli`, `internal/inspect`, `internal/proc` and
 `internal/state`, which currently holds only the immutable local
 [run record](../operator/run-records.md) store; run/session recovery is still future.
+`internal/inspect` serves both the fixed lead source list of `baw inspect` and the
+per-request role source list of [`baw context`](../operator/context.md).
 
 Do not create all empty packages before they are needed. Begin with the smallest tested
 read-only slice. Interface/state choices require an approved specification before

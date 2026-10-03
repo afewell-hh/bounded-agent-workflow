@@ -7,6 +7,8 @@ role, reconcile authority, or recover lost work.
 
 [`baw run create`](run-records.md) reuses this inspection to record a repository's
 object format and committed HEAD; its record format and errors are documented there.
+[`baw context`](context.md) runs the same inspection with a selected lead, worker or
+reviewer source list; `baw inspect` itself always uses the fixed lead list below.
 
 ## Usage
 
