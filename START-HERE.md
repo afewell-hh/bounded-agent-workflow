@@ -32,7 +32,8 @@ The detailed map is in [README.md](README.md).
 
 **The implemented `baw` commands are the read-only [`baw inspect`](docs/operator/inspect.md)
 and [`baw run create` / `baw status` / `baw run diagnose`](docs/operator/run-records.md),** which save,
-display and read-only diagnose a local record of supplied references. They grant no authority, dispatch or recover no work,
+display and read-only diagnose a local record of supplied references, **and the read-only
+[`baw context`](docs/operator/context.md)**, which lists a role's onboarding document references. They grant no authority, dispatch or recover no work,
 and other controller surfaces do not exist yet. You use your existing
 Git/GitHub and native Codex/Claude tools to develop BAW, coordinating messages manually as
 the runbook describes. You do not need a Python controller or a Go installation merely to

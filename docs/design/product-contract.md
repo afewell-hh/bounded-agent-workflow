@@ -120,7 +120,9 @@ is optional, not a correctness dependency.
 
 Use concise role-based onboarding, a maintained project map, accepted ADRs/contracts,
 and ticket-specific references. Native history/auto memory are optional caches, never
-approval or policy authority. Support compact event metadata where documented, without
+approval or policy authority. Implemented so far: [`baw context`](../operator/context.md)
+lists a lead, worker or reviewer's fixed onboarding source references with current Git
+observations; ticket references, prompts and agent launch are not part of it. Support compact event metadata where documented, without
 requiring a particular telemetry protocol or inventing missing measurements.
 
 Helpers are bounded, normally read-only, and tracked by parent/assignment/input

@@ -21,6 +21,7 @@ const Usage = `Usage:
   baw run create --state-dir DIR --run-id ID --repo PATH --ticket URL --scope-sha256 HASH --policy-commit OID [--json]
   baw status --state-dir DIR --run-id ID [--json]
   baw run diagnose --state-dir DIR --run-id ID [--json]
+  baw context --repo PATH --role ROLE [--json]
   baw --help
 
 baw inspect reports read-only Git state counts, fixed maintained-source
@@ -35,6 +36,10 @@ work or live state; authority is not evaluated.
 baw run diagnose counts the structural state of that record and its
 retained staging files, read-only and without Git. Observations are
 sequential, not a snapshot; it gives no recovery advice.
+
+baw context lists fixed onboarding source references for a lead, worker or
+reviewer with the same read-only Git observations. It grants no assignment,
+readiness or authority and starts no agent.
 
 Exit status: 0 success, 1 failure (stderr "baw: CODE"), 2 invalid usage.
 `
@@ -127,6 +132,9 @@ func RunWithLimits(args []string, stdout, stderr io.Writer, limits inspect.Limit
 func run(args []string, stdout, stderr io.Writer, limits *inspect.Limits) int {
 	if len(args) > 0 && (args[0] == "run" || args[0] == "status") {
 		return runRecord(args, stdout, stderr, limits)
+	}
+	if len(args) > 0 && args[0] == "context" {
+		return runContext(args, stdout, stderr, limits)
 	}
 	opts, asJSON, help, ok := parse(args)
 	if help {

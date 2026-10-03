@@ -3,8 +3,8 @@
 Start with [AGENTS.md](AGENTS.md) and the [manual workflow](docs/operator/manual-workflow.md).
 The source contains documentation, templates, proposed contracts and the implemented
 commands: the read-only [`baw inspect`](docs/operator/inspect.md) and
-[`baw run create` / `baw status` / `baw run diagnose`](docs/operator/run-records.md) for a local saved run record;
-other controller surfaces do not exist yet. Build and test with [developer setup](docs/developer/environment.md), and
+[`baw run create` / `baw status` / `baw run diagnose`](docs/operator/run-records.md) for a local saved run record,
+and the read-only [`baw context`](docs/operator/context.md) role reference list; other controller surfaces do not exist yet. Build and test with [developer setup](docs/developer/environment.md), and
 report only checks actually run on the identified candidate.
 
 Use a reviewed work item with a bounded outcome, base commit, relevant context,

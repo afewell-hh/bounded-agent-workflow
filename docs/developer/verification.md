@@ -1,8 +1,9 @@
 # Verification contract
 
-**Current state:** the read-only `baw inspect` slice and the local
+**Current state:** the read-only `baw inspect` slice, the local
 [run-record](../operator/run-records.md) `baw run create`/`baw status`/`baw run diagnose`
-foundation are implemented. Packaging checks are not execution tests. The earlier Python prototype's
+foundation and the read-only [`baw context`](../operator/context.md) role reference list
+are implemented. Packaging checks are not execution tests. The earlier Python prototype's
 test count is not evidence that a new Go implementation behaves correctly. Everything
 below those slices remains a future requirement.
 
@@ -147,6 +148,49 @@ artifact (SHA-1 and SHA-256, text and JSON, no skips).
 Not covered: other users' files (ownership tests use the current user only), other
 platforms, hostile same-user changes beyond the deterministic boundaries above, and any
 claim of an atomic snapshot.
+
+## Implemented slice gates: context
+
+The run-diagnose gates apply, plus `TestContextBinaryJourneys` against the same built
+artifact, and a byte comparison of legacy `baw inspect` output (stdout, stderr, exit;
+text and JSON; SHA-1 and SHA-256) between the previously accepted binary and the
+candidate on one unchanged fixture corpus. The binary journey must actually run: all
+three roles in both object formats and both outputs (12 success combinations) with
+hand-written expected bytes, the [documentation example](../operator/context.md#how-to-hand-a-role-its-reading-list-and-follow-the-references)
+compared with the documented output and its six references followed from the worktree
+top level, subdirectory input, usage/role/repository/symlink failures and a fake `gh`
+that must never run. An unavailable SHA-256 fixture fails rather than skips.
+
+- `internal/inspect` (`profile_test.go`, `state_table_test.go`): hand-written source
+  lists per role and the unchanged legacy list; parsers given synthetic Git records keep
+  counts for every path but path states only for the request's members; the
+  tracked-but-missing-without-status state (`unknown`) driven through the source
+  classification step, since real Git does not produce it. With real Git, for each role
+  and both formats, the selected role file committed, modified, untracked, never tracked
+  and absent, deleted, conflicted, HEAD regular with an index gitlink, HEAD gitlink with
+  an index regular file and a further edit, under a regular-file `workflow/roles`, and
+  in an unborn repository. Each fixture holds one change, so its exact counts are known;
+  every role is requested on every fixture, and legacy inspect equals the lead request.
+  Inherited `GIT_*` variables and a user ignore/config are poisoned.
+- `internal/cli` (`context_test.go`): exact text and generic-JSON oracles (key sets,
+  integer literals, nulls, order) for each role and format; identical bytes from
+  subdirectory and ancestor-symlink inputs; the exact help and the unchanged old usage
+  text and aliases; usage and role validation before any Git run (a marker-writing `git`
+  must not run); unborn, missing-document and detached/dirty observations exiting 0;
+  selected, common and ancestor symlinks, directories and FIFOs failing while the same
+  unselected role files are not probed (legacy inspect still probes its lead file), each
+  in a child of the test binary bounded to 10 seconds and always waited for, whose
+  open-descriptor list is identical before and after a repeated request; filter and
+  partial-clone guards and helper markers for every role; dummy secrets in role files,
+  names, branch, message, remote and config never printed; repository bytes and metadata
+  (not access time) unchanged; the 65,536/65,537-byte output helper; failing, short and
+  prefix-written stdout for packet and help; failing stderr; independence from inspect's
+  32 KiB cap; and alternating and 48 concurrent legacy/lead/worker/reviewer requests with
+  exact per-call source lists. Concurrency runs in the `CGO_ENABLED=0` profile; no race
+  detector result is claimed.
+
+Not covered: hostile same-user changes during a run, a hard filesystem time limit, and
+platforms other than darwin/arm64.
 
 ## Layers
 
