@@ -111,18 +111,29 @@ artifact (SHA-1 and SHA-256, text and JSON, no skips).
   an absent namespace, empty namespace, partial/complete staging only, a real create
   (linked inode established with `Lstat`), a separate identical copy (not linked),
   valid/invalid/oversized/unsupported finals and staging independently, exact
-  16384/16385-byte files, escaped duplicate keys and version precedence; ignored
-  malformed/foreign/unsafe names never touched; symlink, FIFO, directory, socket (via the
-  [socket fixture](environment.md#socket-fixture)), wrong mode and setuid entries;
-  exactly 1024/1025 names and 32/33 staging names. A test-only stage callback injects
-  faults at namespace open/stat/read/close and entry Lstat/open (generic, `ENOENT`,
-  `ELOOP`)/descriptor stat/read/close, and a descriptor tracker asserts every opened
-  descriptor, including the held final, is closed, no partial result is returned, earlier
-  errors win over close errors, and scan/final failures stop later lookups. The same
-  callbacks place deterministic changes before an entry's first `Lstat`, between `Lstat`
-  and open (safe replacement, removal, symlink, FIFO, directory, wrong mode) and between
-  reads of one inode, and create the namespace right after its absent observation.
-  Saved bytes and metadata (not access time) are compared before and after.
+  16384/16385-byte files, and literal and JSON-escaped (a `run_` key spelled with a
+  unicode escape for `i`, checked in the fixture bytes) duplicate keys in finals and staging, including their
+  precedence over an unsupported version; ignored malformed/foreign/unsafe names never
+  touched; symlink, FIFO, directory, socket (via the
+  [socket fixture](environment.md#socket-fixture)), wrong mode and actual setuid entries
+  (via the [special-bit fixture](environment.md#special-bit-fixture)); exactly 1024/1025
+  names and 32/33 staging names. A test-only stage callback injects faults at namespace
+  open/stat/read/close and entry Lstat/open (generic, `ENOENT`, `ELOOP`)/descriptor
+  stat/read/close. A test-only tracker retains every `*os.File` diagnose acquires; after
+  it returns, `Stat` and `Read` on each must fail with `os.ErrClosed`, including the held
+  final and descriptors whose close had an injected error, and during every staging
+  lookup and link comparison the held valid final descriptor must still be open. No
+  partial result is returned, earlier errors win over close errors, and scan/final
+  failures stop later lookups. The same callbacks place deterministic changes before an
+  entry's first `Lstat`, between `Lstat` and open (removal, or installing a replacement
+  regular file, symlink, FIFO, directory or wrong-mode file that was prepared, and checked
+  to be a different device/inode, while the original existed; the installed identity and
+  mode are checked) and between reads of one inode (same inode asserted before and
+  after), and create the namespace right after its absent observation. Special-file,
+  special-bit, socket and boundary-change cases run diagnose in a child of the test
+  binary bounded to 10 seconds and always waited for; a timeout fails with the child's
+  captured output. Saved bytes and metadata (not access time) are compared before and
+  after.
 - `internal/cli` (`diagnose_test.go`): exact hand-written text and JSON bytes plus an
   independent key/type/enum/count check, both object formats via real creates with
   dummy-secret references and the repository removed under marker-writing `git`/`gh`,

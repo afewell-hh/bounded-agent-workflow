@@ -293,8 +293,9 @@ report.
 
 The type and owner/mode checks come first, so a file swapped for an unsafe one reports the
 safety code even though it also changed. A final record that is simply absent is
-`missing`; a listed staging name that is absent is `state_changed`. If the namespace has
-changed, run diagnose again later; nothing is retried automatically.
+`missing`; a listed staging name that is absent is `state_changed`. `state_changed` only
+records that the namespace changed between two of these sequential observations; nothing
+is retried automatically and no next action is implied.
 
 ### Limits and choices
 
