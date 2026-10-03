@@ -4,7 +4,8 @@ Use a native Go toolchain and a local terminal for BAW's first executable slice.
 This guide adapts [execution environments](execution-environments.md) for contributors
 to this tooling repository. The module `github.com/afewell-hh/bounded-agent-workflow`
 (minimum Go 1.27.0, standard library only) provides `cmd/baw` with the read-only
-[`baw inspect`](../operator/inspect.md) command and its tests. See the last section for
+[`baw inspect`](../operator/inspect.md) command, the local
+[run-record commands](../operator/run-records.md) and their tests. See the last section for
 which checks have actually run and what remains unvalidated.
 
 ## Selected toolchain
@@ -126,6 +127,42 @@ help and staged-gitlink runs. It also runs fake-`gh` journeys (no network) for t
 stderr boundary and for descendants left by a normal exit or an output overflow, and
 records whether each descendant was gone when the binary returned.
 
+Run-record journeys use the same flags with their own new directory:
+
+```sh
+go test ./cmd/baw -run TestRunRecordBinaryJourneys -count=1 -args \
+  -baw-binary="$baw_artifact_dir/baw" -journey-dir=NEW_EVIDENCE_DIR/run-record-journeys
+```
+
+It creates a new `0700` state root, dummy SHA-1 and SHA-256 repositories (an unavailable
+SHA-256 fixture fails the test), and records in `summary.txt` the help, usage, create,
+status, duplicate, opposite-width, corrupt-record and documentation-example runs, plus
+status with the repositories removed and only marker-writing fake `git`/`gh` on `PATH`.
+
+### Socket fixture
+
+`TestReadSocketRecordSafety` in `internal/state` checks that status rejects an actual
+Unix socket at the record path. Without extra setup, the test creates its own `0700`
+state root and `0700` `records-v1` namespace under `TMPDIR`, then runs a child of its own
+test binary with the namespace as working directory. The child binds a socket at the
+short relative record name `00112233445566778899aabbccddeeff.json`, closes it without
+unlinking and exits; the test waits for it under a timeout. No listener remains and the
+test process's working directory is unchanged.
+
+Where socket bind is denied, set `BAW_TEST_SOCKET_STATE_DIR` for the test command only,
+to a complete existing state root outside the checkout: a `0700` root and `0700`
+`records-v1` namespace owned by the current user, with a closed Unix socket owned by the
+current user at `records-v1/00112233445566778899aabbccddeeff.json`. The test only reads
+it: it opens the root, checks the namespace and the socket's type and owner, reads that
+ID expecting `unsafe_state_path`, and confirms the root's listing and the fixed metadata
+(mode, owner, inode, link count, size, modification time) of root, namespace and socket
+are unchanged. It never binds, links, changes modes, creates or removes anything there.
+It fails, never skips or falls back, if the root, namespace or socket is missing,
+of another type or mode, or owned by someone else. Only tests read this variable; `baw`
+does not. Creating the fixture needs one bind in a directory you own, for example by a
+host process outside the restricted environment; it is test data, not a running service.
+The Go toolchain, offline settings and sandbox permissions are the same as above.
+
 ## Checks actually executed and remaining validation
 
 For the first `baw inspect` candidate, the implementation worker's own run of gofmt,
@@ -148,6 +185,22 @@ reviewed candidate, and the full post-merge checks passed. Durable records:
 [independent review](https://github.com/afewell-hh/bounded-agent-workflow/issues/4#issuecomment-5927493441),
 [operator exercise](https://github.com/afewell-hh/bounded-agent-workflow/issues/4#issuecomment-5927641558).
 These results cover that host only; other platforms and Git versions have not been exercised.
+
+For the run-record commands, a filesystem probe on this host's APFS volume first
+observed `0700`/`0600` modes, successful `os.File.Sync` on root, namespace and file, and
+an exclusive hard link that left an existing name unchanged (link count 2). The
+implementation worker's own run of gofmt, tests, vet, build, `go version -m`, SHA-256,
+`TestBinaryJourneys` and `TestRunRecordBinaryJourneys` then passed for the uncommitted
+candidate. That was the worker's result only, not independent review or acceptance.
+The first independent review of the committed candidate then observed the full
+`go test` fail in a managed sandbox that denies Unix-socket bind: the socket-rejection
+test created its socket by listening at the record path. It also found two tests creating
+directories under `/tmp` instead of `TMPDIR`. A second independent review then observed
+the full `go test` fail in its sandbox when the test hard-linked a supplied closed socket
+inode into its own directory (`operation not permitted`). The fixtures were reworked
+again as described in [socket fixture](#socket-fixture). Review, gate and integration
+results for this slice are recorded on [ticket #9](https://github.com/afewell-hh/bounded-agent-workflow/issues/9),
+which indexes its run evidence.
 
 This CLI profile applies to BAW development. Future application adopters validate their
 own environment using [project adoption](../operator/project-adoption.md), including

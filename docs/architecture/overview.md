@@ -27,6 +27,10 @@ workflow/                Canonical protocol, roles, and reusable templates
 docs/                    Operator, developer, design, and architecture documentation
 ```
 
+Implemented so far: `cmd/baw`, `internal/cli`, `internal/inspect`, `internal/proc` and
+`internal/state`, which currently holds only the immutable local
+[run record](../operator/run-records.md) store; run/session recovery is still future.
+
 Do not create all empty packages before they are needed. Begin with the smallest tested
 read-only slice. Interface/state choices require an approved specification before
 writing mutating orchestration. The Go module-layout source is in

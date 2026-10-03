@@ -1,9 +1,10 @@
 # Verification contract
 
-**Current state:** only the read-only `baw inspect` slice is implemented. Packaging
-checks are not execution tests. The earlier Python prototype's test count is not evidence
-that a new Go implementation behaves correctly. Everything below that slice remains a
-future requirement.
+**Current state:** the read-only `baw inspect` slice and the local
+[run-record](../operator/run-records.md) `baw run create`/`baw status` foundation are
+implemented. Packaging checks are not execution tests. The earlier Python prototype's
+test count is not evidence that a new Go implementation behaves correctly. Everything
+below those slices remains a future requirement.
 
 ## Implemented slice gates: `baw inspect`
 
@@ -58,6 +59,48 @@ of these gates, fresh independent and designated supplementary review, the live 
 and the operator exercise, and post-merge checks on `main`; see
 [developer setup](environment.md#checks-actually-executed-and-remaining-validation)
 for the durable record links. Detailed results belong in the ticket's run evidence.
+
+## Implemented slice gates: run records
+
+The same gofmt/test/vet/build/metadata/SHA-256 gates apply, plus both
+`TestBinaryJourneys` and `TestRunRecordBinaryJourneys` against the built artifact
+([developer setup](environment.md#first-runnable-acceptance)). SHA-1 **and** SHA-256
+create/status journeys are mandatory in `internal/cli` and in the binary journey; an
+unavailable SHA-256 fixture fails rather than skips.
+
+- `internal/state`: a hand-written nine-field oracle; exact 16384-byte whitespace-padded
+  valid and 16385-byte oversized records; invalid UTF-8, trailing/duplicate (including
+  escaped) keys, case variants, quoted/fractional/exponent/null/huge versions and their
+  precedence, timestamps and width mismatches; root, namespace and record symlink, FIFO,
+  socket, directory, owner/mode cases without blocking or touching outside markers; an
+  ancestor symlink inside the test's own directory resolved while the same symlink as
+  the final root is refused; injected failures at each storage stage with their codes,
+  retained staging and pre/post-publication results; stage order (root sync after
+  namespace acquisition, namespace sync after publication); child-process interruption
+  before and after publication; and bounded concurrent same-ID creators from absent and
+  present namespaces (one success, one `record_exists`, winner's data intact), all
+  joined, including after a failed child start. Escaped-duplicate fixtures contain actual
+  JSON `\u` escapes. A separate socket test reads a real closed socket at the record
+  path of a state root that a joined child creates, or of a complete read-only root
+  supplied by `BAW_TEST_SOCKET_STATE_DIR`
+  ([socket fixture](environment.md#socket-fixture)), and checks the supplied root is
+  unchanged; a missing or invalid supplied root fails.
+- `internal/cli`: both object formats via a subdirectory with uppercase input, dirty and
+  secret-bearing worktrees, nonexistent policy references, opposite widths, unborn and
+  inspection failures leaving the root unchanged, repeat status, duplicates, status with
+  the repository removed and marker-writing `git`/`gh` as the only `PATH`, usage
+  precedence before any filesystem access, new help sink checks beside unchanged old
+  help aliases, failing/short stdout and failing stderr, corrupt records without content
+  leaks, and inspector helper suppression.
+
+Not covered: hardware or power-loss durability, platforms/filesystems other than this
+host's macOS APFS, and hostile same-user changes to the state directory during a run.
+The first committed candidate's independent review observed the full suite fail where
+socket bind was denied, and two tests writing under `/tmp`; the next review observed it
+fail where hard-linking a supplied socket was denied. The fixtures were reworked.
+Gate and review history for this slice is summarized in
+[developer setup](environment.md#checks-actually-executed-and-remaining-validation),
+with detailed results in the ticket's run evidence.
 
 ## Layers
 
