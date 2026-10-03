@@ -34,6 +34,8 @@ const (
 	CodeDurability         Code = "durability_unavailable"
 	CodeCommitUncertain    Code = "commit_uncertain"
 	CodeOutputUnavailable  Code = "output_unavailable"
+	CodeStateChanged       Code = "state_changed"
+	CodeStateScanLimit     Code = "state_scan_limit"
 )
 
 // Error carries only a fixed code; no paths, values or OS error text.

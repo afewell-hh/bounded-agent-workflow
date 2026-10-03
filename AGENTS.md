@@ -1,8 +1,8 @@
 # Agent entry point
 
 This repository builds a future controller. The implemented commands are the read-only
-[`baw inspect`](docs/operator/inspect.md) and [`baw run create` / `baw status`](docs/operator/run-records.md),
-which save and display a local record of supplied references; they grant no authority and
+[`baw inspect`](docs/operator/inspect.md) and [`baw run create` / `baw status` / `baw run diagnose`](docs/operator/run-records.md),
+which save, display and read-only count a local record of supplied references; they grant no authority and
 dispatch or recover nothing. Do not claim other `baw` surfaces exist, infer live test results, or implement the entire design in one assignment.
 
 Read [the common protocol](workflow/protocol.md), then only your assigned

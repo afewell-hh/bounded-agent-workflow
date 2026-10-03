@@ -139,10 +139,28 @@ SHA-256 fixture fails the test), and records in `summary.txt` the help, usage, c
 status, duplicate, opposite-width, corrupt-record and documentation-example runs, plus
 status with the repositories removed and only marker-writing fake `git`/`gh` on `PATH`.
 
+Diagnose journeys use the same flags with their own new directory:
+
+```sh
+go test ./cmd/baw -run TestRunDiagnoseBinaryJourneys -count=1 -args \
+  -baw-binary="$baw_artifact_dir/baw" -journey-dir=NEW_EVIDENCE_DIR/diagnose-journeys
+```
+
+It creates SHA-1 and SHA-256 records (an unavailable SHA-256 fixture fails the test),
+removes the repositories, and runs every diagnose with only marker-writing fake
+`git`/`gh` on `PATH`, each as a child bounded to 10 seconds. Text **and** JSON output are
+compared with exact hand-written reports for an absent namespace, a created record with
+its linked staging name, and mixed staging categories beside ignored unsafe names; dummy
+secret references must not appear, and file bytes, listing, modes, owner, inode, link
+count, size and modification time (not access time) must be unchanged. It also runs help,
+usage, FIFO/symlink/mode failures and the documentation example, recording all in
+`summary.txt`.
+
 ### Socket fixture
 
 `TestReadSocketRecordSafety` in `internal/state` checks that status rejects an actual
-Unix socket at the record path. Without extra setup, the test creates its own `0700`
+Unix socket at the record path; `TestDiagnoseSocketRecord` checks the same for diagnose,
+using the same fixture choice below and the same read-only guarantee. Without extra setup, the test creates its own `0700`
 state root and `0700` `records-v1` namespace under `TMPDIR`, then runs a child of its own
 test binary with the namespace as working directory. The child binds a socket at the
 short relative record name `00112233445566778899aabbccddeeff.json`, closes it without
@@ -162,6 +180,30 @@ of another type or mode, or owned by someone else. Only tests read this variable
 does not. Creating the fixture needs one bind in a directory you own, for example by a
 host process outside the restricted environment; it is test data, not a running service.
 The Go toolchain, offline settings and sandbox permissions are the same as above.
+`TestDiagnoseSocketRecord` runs its diagnose in a child of the test binary bounded to
+10 seconds and always waited for.
+
+### Special-bit fixture
+
+`TestDiagnoseSpecialBits` in `internal/state` checks that diagnose rejects an actual
+setuid final record and staging file with `state_permissions`. Without extra setup, it
+creates a new `0700` directory under `TMPDIR` holding two state roots, `final` and
+`pending`, each with a `0700` `records-v1` namespace; it writes one file in each
+(`00112233445566778899aabbccddeeff.json`, and
+`.pending-00112233445566778899aabbccddeeff-0000000000000000000000000000000a`), sets
+mode `04600` and checks the mode actually observed. Some restricted environments report
+success for that `chmod` but leave the file at `0600`; the test then fails, never skips.
+
+There, set `BAW_TEST_DIAG_SPECIAL_FIXTURES` for the test command only, to a complete
+existing directory outside the checkout with exactly that layout: the directory, both
+roots and both namespaces `0700` and owned by the current user, each namespace holding
+only its one named file, a current-user, single-link, non-executable regular file with
+mode exactly `04600`. The test validates every listing, type, owner and mode itself,
+fails if any differs, and only reads the fixture: it never writes, changes modes,
+creates or removes anything there, and confirms listings, bytes and metadata (mode,
+owner, inode, link count, size, modification time) are unchanged. Only tests read this
+variable; `baw` does not. Creating the fixture needs one `chmod` by a host process
+outside the restricted environment; it is metadata test data, not a program or service.
 
 ## Checks actually executed and remaining validation
 
@@ -201,6 +243,16 @@ inode into its own directory (`operation not permitted`). The fixtures were rewo
 again as described in [socket fixture](#socket-fixture). Review, gate and integration
 results for this slice are recorded on [ticket #9](https://github.com/afewell-hh/bounded-agent-workflow/issues/9),
 which indexes its run evidence.
+
+For `baw run diagnose`, the first independent review of the committed candidate observed
+the full `go test` fail in its environment: `chmod` to `04600` reported success but left
+the setuid test files at `0600`, so the setuid cases were never exercised. It also found
+special-file probes not run in bounded children, a descriptor-closure check that counted
+callbacks rather than closed files, an escaped-duplicate fixture without an escape and
+identity fixtures without independent inode facts. The tests were reworked as described
+in [verification](verification.md#implemented-slice-gates-run-diagnose) and
+[special-bit fixture](#special-bit-fixture). Review, gate and integration results are
+recorded on [ticket #12](https://github.com/afewell-hh/bounded-agent-workflow/issues/12).
 
 This CLI profile applies to BAW development. Future application adopters validate their
 own environment using [project adoption](../operator/project-adoption.md), including

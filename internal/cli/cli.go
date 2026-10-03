@@ -20,6 +20,7 @@ const Usage = `Usage:
   baw inspect --repo PATH [--checkpoint FULL_COMMIT_SHA] [--coordination-file FILE | --github OWNER/REPO#NUMBER] [--json]
   baw run create --state-dir DIR --run-id ID --repo PATH --ticket URL --scope-sha256 HASH --policy-commit OID [--json]
   baw status --state-dir DIR --run-id ID [--json]
+  baw run diagnose --state-dir DIR --run-id ID [--json]
   baw --help
 
 baw inspect reports read-only Git state counts, fixed maintained-source
@@ -30,6 +31,10 @@ baw run create saves an immutable run record of supplied references and the
 observed committed HEAD in an existing private DIR. baw status reads that
 saved record without running Git. A record is not an approval, completed
 work or live state; authority is not evaluated.
+
+baw run diagnose counts the structural state of that record and its
+retained staging files, read-only and without Git. Observations are
+sequential, not a snapshot; it gives no recovery advice.
 
 Exit status: 0 success, 1 failure (stderr "baw: CODE"), 2 invalid usage.
 `
@@ -173,9 +178,10 @@ const MaxRecordOutput = 16384
 var hashRE = regexp.MustCompile(`^[0-9A-Fa-f]{64}$`)
 
 type recordRequest struct {
-	create bool
-	asJSON bool
-	vals   map[string]string
+	create   bool
+	diagnose bool
+	asJSON   bool
+	vals     map[string]string
 }
 
 // parseRecord validates run create/status syntax without touching the
@@ -193,6 +199,11 @@ func parseRecord(args []string) (req recordRequest, help, ok bool) {
 		req.create = true
 		rest = args[2:]
 		allowed = []string{"--state-dir", "--run-id", "--repo", "--ticket", "--scope-sha256", "--policy-commit"}
+		required = allowed
+	case len(args) >= 2 && args[1] == "diagnose":
+		req.diagnose = true
+		rest = args[2:]
+		allowed = []string{"--state-dir", "--run-id"}
 		required = allowed
 	default:
 		return req, false, false
@@ -285,6 +296,12 @@ func codeOf(err error) string {
 
 func runRecord(args []string, stdout, stderr io.Writer, limits *inspect.Limits) int {
 	req, help, ok := parseRecord(args)
+	if help && req.diagnose {
+		if code := deliverBounded(stdout, []byte(Usage), MaxDiagnoseOutput); code != "" {
+			return failRecord(stderr, code)
+		}
+		return 0
+	}
 	if help {
 		if write(stdout, []byte(Usage)) != nil {
 			return failRecord(stderr, string(state.CodeOutputUnavailable))
@@ -298,6 +315,9 @@ func runRecord(args []string, stdout, stderr io.Writer, limits *inspect.Limits) 
 	root, err := state.OpenRoot(req.vals["--state-dir"])
 	if err != nil {
 		return failRecord(stderr, codeOf(err))
+	}
+	if req.diagnose {
+		return runDiagnose(root, id, req.asJSON, stdout, stderr)
 	}
 	if !req.create {
 		rec, err := root.Read(id)

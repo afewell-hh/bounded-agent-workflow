@@ -1,8 +1,8 @@
 # Verification contract
 
 **Current state:** the read-only `baw inspect` slice and the local
-[run-record](../operator/run-records.md) `baw run create`/`baw status` foundation are
-implemented. Packaging checks are not execution tests. The earlier Python prototype's
+[run-record](../operator/run-records.md) `baw run create`/`baw status`/`baw run diagnose`
+foundation are implemented. Packaging checks are not execution tests. The earlier Python prototype's
 test count is not evidence that a new Go implementation behaves correctly. Everything
 below those slices remains a future requirement.
 
@@ -101,6 +101,52 @@ fail where hard-linking a supplied socket was denied. The fixtures were reworked
 Gate and review history for this slice is summarized in
 [developer setup](environment.md#checks-actually-executed-and-remaining-validation),
 with detailed results in the ticket's run evidence.
+
+## Implemented slice gates: run diagnose
+
+The run-record gates apply, plus `TestRunDiagnoseBinaryJourneys` against the same built
+artifact (SHA-1 and SHA-256, text and JSON, no skips).
+
+- `internal/state` (`diagnose_test.go`): hand-written expected states and six counts for
+  an absent namespace, empty namespace, partial/complete staging only, a real create
+  (linked inode established with `Lstat`), a separate identical copy (not linked),
+  valid/invalid/oversized/unsupported finals and staging independently, exact
+  16384/16385-byte files, and literal and JSON-escaped (a `run_` key spelled with a
+  unicode escape for `i`, checked in the fixture bytes) duplicate keys in finals and staging, including their
+  precedence over an unsupported version; ignored malformed/foreign/unsafe names never
+  touched; symlink, FIFO, directory, socket (via the
+  [socket fixture](environment.md#socket-fixture)), wrong mode and actual setuid entries
+  (via the [special-bit fixture](environment.md#special-bit-fixture)); exactly 1024/1025
+  names and 32/33 staging names. A test-only stage callback injects faults at namespace
+  open/stat/read/close and entry Lstat/open (generic, `ENOENT`, `ELOOP`)/descriptor
+  stat/read/close. A test-only tracker retains every `*os.File` diagnose acquires; after
+  it returns, `Stat` and `Read` on each must fail with `os.ErrClosed`, including the held
+  final and descriptors whose close had an injected error, and during every staging
+  lookup and link comparison the held valid final descriptor must still be open. No
+  partial result is returned, earlier errors win over close errors, and scan/final
+  failures stop later lookups. The same callbacks place deterministic changes before an
+  entry's first `Lstat`, between `Lstat` and open (removal, or installing a replacement
+  regular file, symlink, FIFO, directory or wrong-mode file that was prepared, and checked
+  to be a different device/inode, while the original existed; the installed identity and
+  mode are checked) and between reads of one inode (same inode asserted before and
+  after), and create the namespace right after its absent observation. Special-file,
+  special-bit, socket and boundary-change cases run diagnose in a child of the test
+  binary bounded to 10 seconds and always waited for; a timeout fails with the child's
+  captured output. Saved bytes and metadata (not access time) are compared before and
+  after.
+- `internal/cli` (`diagnose_test.go`): exact hand-written text and JSON bytes plus an
+  independent key/type/enum/count check, both object formats via real creates with
+  dummy-secret references and the repository removed under marker-writing `git`/`gh`,
+  usage precedence before filesystem access, root/namespace/entry failures, every fatal
+  code's exit/stdout/stderr (through a test-only replacement of the storage call),
+  failing/short/prefix-then-error stdout for report and help, failing stderr, and the
+  shared 4096/4097-byte bounded-output helper with synthetic buffers. Every diagnosis of
+  saved data, including the FIFO cases, runs in a child of the test binary bounded to
+  10 seconds and always waited for; a timeout fails with the child's captured output.
+
+Not covered: other users' files (ownership tests use the current user only), other
+platforms, hostile same-user changes beyond the deterministic boundaries above, and any
+claim of an atomic snapshot.
 
 ## Layers
 
