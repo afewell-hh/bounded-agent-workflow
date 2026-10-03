@@ -139,10 +139,28 @@ SHA-256 fixture fails the test), and records in `summary.txt` the help, usage, c
 status, duplicate, opposite-width, corrupt-record and documentation-example runs, plus
 status with the repositories removed and only marker-writing fake `git`/`gh` on `PATH`.
 
+Diagnose journeys use the same flags with their own new directory:
+
+```sh
+go test ./cmd/baw -run TestRunDiagnoseBinaryJourneys -count=1 -args \
+  -baw-binary="$baw_artifact_dir/baw" -journey-dir=NEW_EVIDENCE_DIR/diagnose-journeys
+```
+
+It creates SHA-1 and SHA-256 records (an unavailable SHA-256 fixture fails the test),
+removes the repositories, and runs every diagnose with only marker-writing fake
+`git`/`gh` on `PATH`, each as a child bounded to 10 seconds. Text **and** JSON output are
+compared with exact hand-written reports for an absent namespace, a created record with
+its linked staging name, and mixed staging categories beside ignored unsafe names; dummy
+secret references must not appear, and file bytes, listing, modes, owner, inode, link
+count, size and modification time (not access time) must be unchanged. It also runs help,
+usage, FIFO/symlink/mode failures and the documentation example, recording all in
+`summary.txt`.
+
 ### Socket fixture
 
 `TestReadSocketRecordSafety` in `internal/state` checks that status rejects an actual
-Unix socket at the record path. Without extra setup, the test creates its own `0700`
+Unix socket at the record path; `TestDiagnoseSocketRecord` checks the same for diagnose,
+using the same fixture choice below and the same read-only guarantee. Without extra setup, the test creates its own `0700`
 state root and `0700` `records-v1` namespace under `TMPDIR`, then runs a child of its own
 test binary with the namespace as working directory. The child binds a socket at the
 short relative record name `00112233445566778899aabbccddeeff.json`, closes it without

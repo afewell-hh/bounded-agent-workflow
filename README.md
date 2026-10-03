@@ -11,8 +11,8 @@ You do not need an earlier ZIP, a separate Markdown attachment, or the old Pytho
 
 **Status: early implementation.** The implemented commands, built from source with Go,
 are the read-only [`baw inspect`](docs/operator/inspect.md) and
-[`baw run create` / `baw status`](docs/operator/run-records.md), which save and display
-a local record of supplied references (not an approval or live state). There is no
+[`baw run create` / `baw status` / `baw run diagnose`](docs/operator/run-records.md), which save,
+display and read-only diagnose a local record of supplied references (not an approval or live state). There is no
 controller, release, installed plugin or configured application. Other `baw` command
 examples remain proposed interfaces, not available commands.
 
@@ -73,7 +73,7 @@ Do not overlay this tooling seed or silently replace a project's governing polic
 | Adopt an existing/new application | [Project adoption](docs/operator/project-adoption.md) |
 | Configure development, previews, and shared labs | [Execution environments](docs/developer/execution-environments.md) |
 | Inspect a repository's state read-only | [`baw inspect`](docs/operator/inspect.md) |
-| Save and read a local run record | [Run records](docs/operator/run-records.md) |
+| Save, read and diagnose a local run record | [Run records](docs/operator/run-records.md) |
 | Prepare BAW's native Go development environment | [Developer setup](docs/developer/environment.md) — toolchain, build and test route |
 | Supply app/API secrets and control external writes | [Secrets and access](docs/developer/secrets-and-access.md) |
 | Complete routine tickets without per-merge human approvals | [GitHub single-account procedure](docs/operator/github-single-account.md) |

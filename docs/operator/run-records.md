@@ -1,4 +1,4 @@
-# Save and read run records with `baw run create` and `baw status`
+# Save, read and diagnose run records with `baw run create`, `baw status` and `baw run diagnose`
 
 `baw run create` saves one immutable local record of caller-supplied references (a
 ticket URL, a scope SHA-256 and a policy commit) plus the committed HEAD observed in a
@@ -12,14 +12,16 @@ and reservation ownership are `unknown`. Anyone with write access to the state d
 edit a record; strict validation detects structural corruption, not authorship.
 
 This is a storage foundation for a future controller. There is no listing, update, cleanup,
-migration or automatic ID allocation.
+migration or automatic ID allocation. [`baw run diagnose`](#diagnose-saved-state-with-baw-run-diagnose)
+counts what is saved for one ID, read-only, and recommends nothing.
 
 ## Usage
 
 ```
 baw run create --state-dir DIR --run-id ID --repo PATH --ticket URL --scope-sha256 HASH --policy-commit OID [--json]
 baw status --state-dir DIR --run-id ID [--json]
-baw run --help | baw run create --help | baw status --help
+baw run diagnose --state-dir DIR --run-id ID [--json]
+baw run --help | baw run create --help | baw status --help | baw run diagnose --help
 ```
 
 - `DIR` must already exist, be a directory owned by you with mode `0700` and no
@@ -38,7 +40,8 @@ baw run --help | baw run create --help | baw status --help
 - Options accept `--flag value` or `--flag=value`. Unknown, repeated, missing or empty
   options, extra arguments and `--json=...` are `invalid_usage`. `--help` combined with any
   other option is `invalid_usage`. The new help forms print the global help; only
-  `--help` (not `-h`/`help`) is accepted after `run`, `run create` and `status`.
+  `--help` (not `-h`/`help`) is accepted after `run`, `run create`, `status` and
+  `run diagnose`.
 - Help, record and failure output never contain paths, repository text or OS error text.
 
 ## What create observes
@@ -154,6 +157,8 @@ everything else exits 1. Inspection failures keep [inspect's codes](inspect.md#f
 | `output_unavailable` | Status or new help output could not be fully written |
 | `output_limit` | Rendered output would exceed 16384 bytes (checked before publication) |
 
+Diagnose has its own [failure list](#diagnose-failures).
+
 After `commit_uncertain`, run `baw status` with the same `--state-dir` and `--run-id` to
 see whether the record reads back. Keep the record and its staging name, and do not edit
 them. Do not repeat create blindly: the same ID only reports `record_exists`, and a new ID
@@ -185,3 +190,123 @@ When storage operations succeed, two concurrent creates of one ID produce one su
 and one `record_exists`, never a mixed record. The design assumes trusted ancestor directories and no hostile same-user
 changes to the namespace while BAW runs; symlink and permission checks prevent mistakes,
 they are not isolation.
+
+## Diagnose saved state with `baw run diagnose`
+
+`baw run diagnose --state-dir DIR --run-id ID [--json]` reports the structure of what is
+saved for one ID: whether the namespace exists, the final record's state and counts of
+its matching staging files. It reads only; it creates, repairs, moves, deletes, retries
+and executes nothing (no Git or `gh`), and prints no advice. `DIR` and `ID` follow the same
+rules as status. A completed diagnosis exits 0 even when data is missing or malformed:
+that means the observation finished, not that anything is recoverable or healthy.
+
+What it reads, in order, after the same `DIR` and namespace checks as status:
+
+1. If `records-v1` was absent at that check, it stops: `Namespace: absent`, final
+   `missing`, all counts 0. Nothing else is looked up, and a namespace created a moment
+   later does not change that report. Absent does not prove it never existed.
+2. Otherwise it lists the namespace's direct names, without recursion. The namespace may
+   hold at most **1024 names of any kind**, and at most **32** staging names
+   `.pending-ID-RANDOM` for this ID (`RANDOM` exactly 32 lowercase hex); more is
+   `state_scan_limit`. Every other name, including malformed staging names and other IDs'
+   files, is counted toward 1024 but never opened, statted or printed.
+3. It looks up `ID.json` by name, even if the listing did not show it.
+4. It reads each matching staging file in name order.
+
+Each file read must be a regular file you own with mode `0600`, exactly as status
+requires; it is checked by name, opened without following links or blocking, checked again
+through the open file and compared with the earlier check. Each is read up to 16385 bytes
+and judged with status's [record validation](#record-file).
+
+| Final record | Meaning |
+|---|---|
+| `missing` | No `ID.json` (or no namespace) |
+| `valid` | Passes status's strict validation for this ID |
+| `invalid_record`, `record_too_large`, `unsupported_record_version` | The status error it would give |
+
+Staging counts use the same categories: `total` = `valid` + `invalid_record` +
+`record_too_large` + `unsupported_record_version`. `linked_to_final` counts staging files
+that are the **same file** (device and inode) as a valid final record, as a successful
+create leaves them. It overlaps the other counts, is never added to `total`, and is 0
+whenever the final record is not valid. An identical copy that is a separate file is not
+linked. A valid staging file without a final record is shown as such, not labeled
+abandoned or interrupted.
+
+### Example
+
+After the [create example](#example-from-an-empty-private-root) above:
+
+```sh
+baw run diagnose --state-dir "$WORK/state" --run-id 00112233445566778899aabbccddeeff
+```
+
+```
+BAW run diagnosis
+Run: 00112233445566778899aabbccddeeff
+Namespace: present
+Final record: valid
+Staging: total=1 valid=1 invalid_record=0 record_too_large=0 unsupported_record_version=0 linked_to_final=1
+Snapshot: non_atomic
+Durability: unknown
+Authority: not_evaluated
+Runtime state: unknown
+Process ownership: unknown
+Remote freshness: unknown
+Reservation ownership: unknown
+```
+
+`--json` prints one object and a newline with exactly these keys:
+`{"schema_version":1,"operation":"diagnose","run_id":"00112233445566778899aabbccddeeff","namespace":"present","final_record":"valid","staging":{"total":1,"valid":1,"invalid_record":0,"record_too_large":0,"unsupported_record_version":0,"linked_to_final":1},"snapshot":"non_atomic","durability":"unknown","authority":"not_evaluated","runtime_state":"unknown","process_ownership":"unknown","remote_freshness":"unknown","reservation_ownership":"unknown"}`.
+`schema_version` is the diagnosis format, not the record format. Output never contains
+stored ticket/scope/policy/HEAD/time values, file names, staging suffixes, paths, bytes,
+inode numbers or OS errors, and is at most 4096 bytes.
+
+### What the fixed fields mean
+
+- `Snapshot: non_atomic`: files are read one after another with no lock. If anything
+  writes to the namespace meanwhile (for example a concurrent create), the report can
+  mix moments. Rewriting a file in place between reads, or replacing one before it is
+  first checked, is not detected.
+- `Durability: unknown`: a valid staging file does not show its sync completed; a valid
+  final record does not show the namespace sync or output delivery succeeded.
+- `Authority: not_evaluated` and `unknown` runtime state, process ownership, remote
+  freshness and reservation ownership: diagnose cannot tell whether a process is still
+  running, crashed or was approved, and decides nothing about what to do next.
+- Read-only means BAW makes no change; the operating system may still update access times.
+
+### Diagnose failures
+
+These exit 1 with empty stdout and `baw: CODE` on stderr (best effort); syntax errors are
+`invalid_usage`, exit 2, before any filesystem access. A failure never prints a partial
+report.
+
+| Code | Meaning |
+|---|---|
+| `state_unavailable`, `state_permissions`, `unsafe_state_path` | As for status, for `DIR` and the namespace; also when listing the namespace fails (`state_unavailable`) |
+| `unsafe_state_path` | The final or a matching staging name is a symlink, FIFO, socket, directory or other non-regular file |
+| `state_permissions` | It is not yours, not mode `0600`, or has setuid/setgid/sticky bits |
+| `record_unavailable` | Checking, opening, reading or closing it failed |
+| `state_changed` | A listed staging name was gone when checked, or a name vanished, became a symlink or became a different file between its check and its open |
+| `state_scan_limit` | More than 1024 namespace names, or more than 32 staging names for this ID |
+| `output_limit` | The report would exceed 4096 bytes |
+| `output_unavailable` | Report or `run diagnose --help` output could not be fully written; bytes already written stay written |
+
+The type and owner/mode checks come first, so a file swapped for an unsafe one reports the
+safety code even though it also changed. A final record that is simply absent is
+`missing`; a listed staging name that is absent is `state_changed`. If the namespace has
+changed, run diagnose again later; nothing is retried automatically.
+
+### Limits and choices
+
+- **The 1024-name cap.** Each successful create adds two names (`ID.json` and its
+  staging link), so 512 successful creates fill the namespace exactly; a 513th, or
+  extra staging/foreign names, makes diagnose refuse with `state_scan_limit` for **every**
+  ID in that `DIR`. Create and status are not affected. To keep diagnosis usable, choose
+  another new private `0700` `DIR` for future records. Keep the old one and use status
+  there; nothing is moved or deleted automatically.
+- **Unusual umask.** Create removes umask reductions on new staging files only after
+  creating them. If an interruption happens in between under a umask that removes owner
+  bits, a staging file can have the wrong mode; diagnose reports `state_permissions` and
+  does not repair it.
+- Ownership is checked against the current user only; no other platform than this
+  project's developer macOS host has been exercised.
