@@ -113,7 +113,21 @@ func TestExecuteRestoresSignals(t *testing.T) {
 // A cancelled context reaching the execute path reports execution_cancelled
 // with empty stdout before any acquisition.
 func TestExecuteWithCancelledContext(t *testing.T) {
+	// The state root must pass its 0700/owner check so that cancellation,
+	// not state_permissions, is the first failure: t.TempDir subdirectories
+	// follow the umask, so set and confirm the mode explicitly.
 	root := t.TempDir()
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st, ok := fi.Sys().(*syscall.Stat_t); !fi.IsDir() || fi.Mode().Perm() != 0o700 || fi.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 ||
+		!ok || int(st.Uid) != os.Getuid() {
+		t.Fatalf("fixture root %v not an owned 0700 directory", fi.Mode())
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	var out, errb bytes.Buffer

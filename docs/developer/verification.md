@@ -195,7 +195,22 @@ the result retained; real SIGINT and SIGTERM during the worker give the publishe
   the intent and no result, and a repeat refuses with no added start; the harness joins
   the controller through its own handle, releases the worker it launched and observes
   it finish, and never signals a stored ID. These are tests of one host's behavior,
-  not a power-loss or containment claim.
+  not a power-loss or containment claim. `boundary_test.go` drives the real
+  `Execute`/`RunObserved` path for both object formats and both outputs with a fake
+  worker that starts one finite compiled child (the test binary again, empty
+  environment) and returns 0 only after the outer harness has observed the child alive
+  through an exclusive lock it holds (no process ID is stored or signalled), with a
+  per-run nonce in the ready and release records and a 30 second child deadline. A child
+  in the worker's group is terminated by cleanup and the verifier is admitted
+  (`verification_passed`); a `setsid` child holding the output pipe gives
+  `worker_unverified` with no verifier start; a `setsid` child that closed its pipes before
+  the worker returned is still running when `verification_passed` is published, which is
+  the documented observation limit, not containment. The harness releases each escaped
+  child and observes it finish on every path, including failed assertions.
+- `internal/cli` `TestExecuteWithCancelledContext` sets its own state root to 0700 and
+  checks the observed mode and owner first, because temporary subdirectories follow the
+  umask and a looser root correctly fails `state_permissions` before cancellation is
+  observed.
 - `internal/inspect` (`top_test.go`): `InspectTop` returns the same packet or error as
   `Inspect` and the physical top level for both object formats, a subdirectory and a
   symlinked alias.

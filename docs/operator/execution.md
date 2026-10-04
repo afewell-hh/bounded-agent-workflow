@@ -181,6 +181,19 @@ output pipes. A descendant that left the group, or that you cannot signal, is
 not observed; no result claims every descendant stopped. Causes such as timeout
 versus output cap are deliberately not distinguished.
 
+What this means for a worker that starts a background process:
+
+- A child left in the worker's own process group is terminated during cleanup
+  before the verifier is considered.
+- A child that left the group but still holds an output pipe prevents
+  end-of-file: the result is `worker_unverified` and no verifier starts. The
+  child keeps running; baw does not signal it.
+- A child that left the group and closed its output pipes before the worker
+  exited is invisible to these checks. The verifier can be admitted and the
+  result can be `verification_passed` while that child is still running and
+  able to change the worktree. baw cannot detect or stop it; if your worker
+  may do this, check for such processes yourself.
+
 `after_head` is the HEAD observed after the worker and before the verifier
 (null if unborn or if that inspection was not accepted). Nothing inspects the
 repository after the verifier, which may itself edit or commit. A worker commit
