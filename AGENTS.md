@@ -4,7 +4,8 @@ This repository builds a future controller. The implemented commands are the rea
 [`baw inspect`](docs/operator/inspect.md) and [`baw run create` / `baw status` / `baw run diagnose`](docs/operator/run-records.md),
 which save, display and read-only count a local record of supplied references, and the read-only
 [`baw context`](docs/operator/context.md) role reference list, and
-[`baw run execute`](docs/operator/execution.md), one recorded trusted local worker and verifier attempt; they grant no authority and
+[`baw run execute`](docs/operator/execution.md), one recorded trusted local worker and verifier attempt, and
+[`baw run review`](docs/operator/review.md), one recorded trusted reviewer-program verdict for a committed candidate; they grant no authority and
 dispatch or recover nothing. Do not claim other `baw` surfaces exist, infer live test results, or implement the entire design in one assignment.
 
 Read [the common protocol](workflow/protocol.md), then only your assigned

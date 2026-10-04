@@ -18,6 +18,7 @@ const wantGlobalUsage = "Usage:\n" +
 	"  baw run diagnose --state-dir DIR --run-id ID [--json]\n" +
 	"  baw context --repo PATH --role ROLE [--json]\n" +
 	"  baw run execute --repo PATH --state-dir DIR --run-id ID --plan FILE [--json]\n" +
+	"  baw run review --repo PATH --state-dir DIR --run-id ID --candidate OID --plan FILE [--json]\n" +
 	"  baw --help\n" +
 	"\n" +
 	"baw inspect reports read-only Git state counts, fixed maintained-source\n" +
@@ -40,7 +41,10 @@ const wantGlobalUsage = "Usage:\n" +
 	"Exit status: 0 success, 1 failure (stderr \"baw: CODE\"), 2 invalid usage.\n" +
 	"\n" +
 	"Run execute records one local worker and verification attempt; it evaluates no approval,\n" +
-	"provides no native adapter and never retries or recovers an interrupted attempt.\n"
+	"provides no native adapter and never retries or recovers an interrupted attempt.\n" +
+	"\n" +
+	"Run review records one trusted reviewer-program verdict for a committed candidate;\n" +
+	"it evaluates no approval and supplies no native agent adapter, verification or merge authority.\n"
 
 func TestGlobalUsageFrozenBytes(t *testing.T) {
 	if Usage != wantGlobalUsage {

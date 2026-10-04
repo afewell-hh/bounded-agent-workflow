@@ -7,7 +7,8 @@ to this tooling repository. The module `github.com/afewell-hh/bounded-agent-work
 [`baw inspect`](../operator/inspect.md) command, the local
 [run-record commands](../operator/run-records.md), the read-only
 [`baw context`](../operator/context.md) command, the
-[`baw run execute`](../operator/execution.md) local worker/verifier primitive (exercised only
+[`baw run execute`](../operator/execution.md) local worker/verifier primitive and the
+[`baw run review`](../operator/review.md) reviewer-program primitive (both exercised only
 with compiled fake programs; no native agent adapter) and their tests. See the last section for
 which checks have actually run and what remains unvalidated.
 
@@ -319,6 +320,17 @@ marker. The parser now runs before a close-only error is chosen, and the tests w
 reworked as described in [verification](verification.md#implemented-slice-gates-execute)
 and [special-bit fixture](#special-bit-fixture). Review, gate and integration results
 are recorded on [ticket #18](https://github.com/afewell-hh/bounded-agent-workflow/issues/18), not here.
+
+For `baw run review`, the implementation worker's one mandatory gate run on its first
+candidate passed gofmt and the full `go test` (supplied fixture variables set) but failed
+`go vet` on a test-only `append` with no values; build, metadata, the six binary journeys
+and the 76 legacy comparisons did not run on those bytes. The test line was corrected
+afterwards and only focused gofmt/vet ran on it. A later repair added the missing test
+oracles described in [verification](verification.md#implemented-slice-gates-review) and
+ran the mandatory gates once on its final bytes; that run is the worker's claim only.
+Default host gates (all three fixture variables unset), independent review, integration
+and closeout results are recorded on
+[ticket #21](https://github.com/afewell-hh/bounded-agent-workflow/issues/21), not here.
 
 This CLI profile applies to BAW development. Future application adopters validate their
 own environment using [project adoption](../operator/project-adoption.md), including

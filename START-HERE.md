@@ -35,7 +35,8 @@ and [`baw run create` / `baw status` / `baw run diagnose`](docs/operator/run-rec
 display and read-only diagnose a local record of supplied references, **and the read-only
 [`baw context`](docs/operator/context.md)**, which lists a role's onboarding document references, **and
 [`baw run execute`](docs/operator/execution.md)**, which runs one trusted local worker and one verification
-program you choose in a recorded, never-repeated attempt. They grant no authority, dispatch no agents and recover no work,
+program you choose in a recorded, never-repeated attempt, **and [`baw run review`](docs/operator/review.md)**,
+which records one trusted reviewer program's verdict on a clean committed candidate. They grant no authority, dispatch no agents and recover no work,
 and other controller surfaces do not exist yet. You use your existing
 Git/GitHub and native Codex/Claude tools to develop BAW, coordinating messages manually as
 the runbook describes. You do not need a Python controller or a Go installation merely to
