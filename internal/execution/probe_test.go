@@ -21,6 +21,7 @@ import (
 const (
 	socketStateEnv = "BAW_TEST_SOCKET_STATE_DIR"
 	diagSpecialEnv = "BAW_TEST_DIAG_SPECIAL_FIXTURES"
+	execSetgidEnv  = "BAW_TEST_EXEC_SETGID_PLAN"
 	fixtureNS      = "records-v1"
 	fixtureID      = "00112233445566778899aabbccddeeff"
 )
@@ -149,6 +150,76 @@ func setuidPlan(t *testing.T, dir string) (string, func()) {
 	}
 }
 
+// fileSnap is the preserved state of a supplied fixture: bytes, metadata
+// other than atime, and its parent directory listing.
+type fileSnap struct {
+	sum          string
+	mode         os.FileMode
+	size         int64
+	dev          int32
+	ino          uint64
+	nlink        uint16
+	uid          uint32
+	mtime, ctime syscall.Timespec
+	listing      string
+}
+
+func snapFile(t *testing.T, p string) fileSnap {
+	t.Helper()
+	fi, err := os.Lstat(p)
+	if err != nil {
+		t.Fatalf("fixture %s: %v", p, err)
+	}
+	st := fi.Sys().(*syscall.Stat_t)
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("fixture %s: %v", p, err)
+	}
+	ents, err := os.ReadDir(filepath.Dir(p))
+	if err != nil {
+		t.Fatalf("fixture parent %s: %v", p, err)
+	}
+	var names []string
+	for _, e := range ents {
+		names = append(names, e.Name()+":"+e.Type().String())
+	}
+	return fileSnap{sha256Hex(b), fi.Mode(), fi.Size(), st.Dev, st.Ino, st.Nlink, st.Uid,
+		st.Mtimespec, st.Ctimespec, strings.Join(names, "/")}
+}
+
+// setgidPlan returns an actual mode 02600 regular file and a preservation
+// check. With BAW_TEST_EXEC_SETGID_PLAN set it uses that registered
+// read-only fixture as is: it must already be an absolute, current-user,
+// single-link regular file of mode exactly 02600 (no setuid, sticky or
+// execute bit), otherwise the test fails; it is never modified. Unset, the
+// test creates and observes its own.
+func setgidPlan(t *testing.T, dir string) (string, func()) {
+	t.Helper()
+	p := os.Getenv(execSetgidEnv)
+	if p == "" {
+		p = filepath.Join(dir, "setgid.json")
+		if err := os.WriteFile(p, []byte(planWith(okCmd)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(p, 0o600|os.ModeSetgid); err != nil {
+			t.Fatal(err)
+		}
+	} else if !filepath.IsAbs(p) {
+		t.Fatalf("%s is not absolute", execSetgidEnv)
+	}
+	before := snapFile(t, p)
+	if !before.mode.IsRegular() || before.mode&(os.ModeSetgid|os.ModeSetuid|os.ModeSticky) != os.ModeSetgid ||
+		before.mode.Perm() != 0o600 || before.uid != uint32(os.Getuid()) || before.nlink != 1 {
+		t.Fatalf("setgid fixture %s not observed as current-user single-link 02600 regular file: %v uid=%d nlink=%d (set %s where chmod cannot set it)",
+			p, before.mode, before.uid, before.nlink, execSetgidEnv)
+	}
+	return p, func() {
+		if snapFile(t, p) != before {
+			t.Fatalf("setgid fixture %s changed", p)
+		}
+	}
+}
+
 // track retains every descriptor the package opens during fn and proves
 // each is actually closed afterwards: Stat on a closed *os.File fails with
 // os.ErrClosed. It returns how many were opened.
@@ -263,7 +334,12 @@ func TestDescriptorsClosedAtEveryStage(t *testing.T) {
 	big := filepath.Join(dir, "big.json")
 	os.WriteFile(big, []byte(planWith(okCmd)+strings.Repeat(" ", MaxPlanBytes)), 0o600)
 	os.Chmod(big, 0o600)
-	planHook = func(string) error { return errors.New("close") }
+	planHook = func(s string) error {
+		if s == "close" {
+			return errors.New("close")
+		}
+		return nil
+	}
 	if n := track(t, func() { ReadPlan(big) }); n != 1 {
 		t.Fatalf("plan opened %d", n)
 	}

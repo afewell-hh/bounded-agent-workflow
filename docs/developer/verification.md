@@ -174,12 +174,25 @@ the result retained; real SIGINT and SIGTERM during the worker give the publishe
 `worker_unverified` packet and the harness confirms its recorded fake process is gone; the
 [documentation example](../operator/execution.md#how-to-run-a-disposable-example) is followed.
 
-- `internal/execution`: strict plan parser (byte cap, raw integers, escaped duplicate keys,
-  argument limits), plan file safety and precedence with each read in a child of the test
-  binary bounded to 10 seconds and always waited for (symlink, FIFO, directory, an actual
-  socket and observed setuid/setgid modes via the
+- `internal/execution`: strict plan parser (byte cap, raw integers, argument limits) and
+  duplicate names after decoding: each fixture spells `schema_version` (top level) or
+  `executable` (worker and verification commands) once literally and once with a genuine
+  JSON `\u` escape, checked in the fixture bytes and decoded to the known name; the escaped
+  spelling alone is accepted and only the pair is refused. Plan file safety with each read
+  in a child of the test binary bounded to 10 seconds and always waited for (symlink,
+  FIFO, directory, an actual socket and observed setuid and setgid modes via the
   [socket](environment.md#socket-fixture) and
-  [special-bit](environment.md#special-bit-fixture) fixture choices, close errors),
+  [special-bit](environment.md#special-bit-fixture) fixture choices). In-process plan
+  precedence on regular files with test-only open/read/close seams: with an injected
+  close error, malformed JSON, invalid UTF-8, schema version 2 and oversize plans still
+  give `invalid_execution_plan`; an injected non-EOF read error on unparseable bytes gives
+  `plan_unavailable` with or without a close error; a close error alone gives
+  `plan_unavailable`; the read and close boundaries are reached in every case and the one
+  opened `*os.File` reports `os.ErrClosed`. Between the safe `Lstat` and the open, the
+  plan is renamed aside (the original stays, so its inode cannot be reused) and replaced
+  by a file whose device/inode is independently observed to differ: a `0644` replacement
+  gives `state_permissions` and a directory `unsafe_state_path` (safety before identity),
+  a safe `0600` replacement `state_changed`, each also with a close error. Then
   layout/alias/prefix-sibling and executable checks, every §7 row with real fake programs
   or in-package seams, fault injection at every scratch/intent/result/delivery stage (no
   start before intent, retained evidence after the verifier started), deterministic
@@ -215,9 +228,19 @@ the result retained; real SIGINT and SIGTERM during the worker give the publishe
   `Inspect` and the physical top level for both object formats, a subdirectory and a
   symlinked alias.
 - `internal/proc` (`observed_test.go`): observed facts for normal exit, signal, timeout,
-  caps, cancellation before Start, Start failure, watcher setup/runtime failure after Start,
-  actual pipe EOF versus a reader error or forced close, and `Spec.Dir`; the existing
-  `proc_test.go` regressions keep covering legacy `Run`.
+  caps, cancellation before Start, Start failure, forced close by an escaped pipe holder,
+  and `Spec.Dir`. A test-only reader seam fails one stream's reader with a non-EOF error
+  after real bytes arrived and before EOF: that stream's EOF is not observed and the
+  result is unusable, while the other stream's EOF and the exit, join and group facts are
+  observed, and legacy `Run` returns the same bytes and no error as before. Watcher
+  setup and runtime failures are injected only after the leader, the test binary itself
+  with an explicit environment, is independently visible as started (a nonce ready file
+  plus an exclusive lock it holds); setup failure keeps `Started`, reports `ErrStart` for
+  both runners and leaves the leader joined only in the background, runtime failure is
+  unusable without waiting for the timeout. On every path the harness releases the
+  fixture and waits for its lock to be free, so its end is not inferred from any wait
+  returning; no process ID is used. The existing `proc_test.go` regressions keep covering
+  legacy `Run`.
 - `internal/cli` (`execute_test.go`): frozen global and execute help bytes, syntax errors and
   restoration of the caller's signal handling after execute returns.
 

@@ -103,7 +103,9 @@ const pollInterval = 10 * time.Millisecond
 var (
 	watchSetupFault   func() error
 	watchRuntimeFault func() <-chan struct{}
-	readFaultHook     func(stdout bool) bool
+	// pipeReader may wrap a pipe's reader, e.g. to inject a non-EOF read
+	// error at the reader boundary.
+	pipeReader func(r io.Reader, stdout bool) io.Reader
 )
 
 // capture drains one pipe, keeping at most limit bytes. Bytes beyond the limit
@@ -122,16 +124,20 @@ type capture struct {
 
 func newCapture(f *os.File, limit int, keep bool) *capture {
 	c := &capture{limit: limit, keep: keep, over: make(chan struct{}), done: make(chan struct{})}
+	var r io.Reader = f
+	if pipeReader != nil {
+		r = pipeReader(f, keep)
+	}
 	go func() {
 		defer close(c.done)
 		b := make([]byte, 32<<10)
 		for {
-			n, err := f.Read(b)
+			n, err := r.Read(b)
 			if n > 0 {
 				c.add(b[:n])
 			}
 			if err != nil {
-				if err == io.EOF && (readFaultHook == nil || !readFaultHook(keep)) {
+				if err == io.EOF {
 					c.mu.Lock()
 					c.eof = true
 					c.mu.Unlock()

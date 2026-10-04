@@ -2,9 +2,14 @@ package proc
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -59,40 +64,232 @@ func TestObservedStartFailureIsNotStarted(t *testing.T) {
 	}
 }
 
-// Watcher setup failure after a successful Start: Started stays true, so the
-// command is never reported as not started; legacy Run still says ErrStart.
+// With BAW_PROC_HELPER=marker the test binary is a finite fixture leader: it
+// holds an exclusive lock on DIR/lock for its whole life, then makes
+// DIR/ready visible containing its nonce and exits after DIR/release appears
+// or 20 seconds. The harness observes it only through these files: the lock
+// is free exactly when no fixture process holds it. No PID is used.
+func init() {
+	if os.Getenv("BAW_PROC_HELPER") == "marker" {
+		os.Exit(markerHelper(os.Getenv("BAW_PROC_DIR"), os.Getenv("BAW_PROC_NONCE")))
+	}
+}
+
+func markerHelper(dir, nonce string) int {
+	l, err := os.OpenFile(filepath.Join(dir, "lock"), os.O_RDWR, 0)
+	if err != nil {
+		return 2
+	}
+	if syscall.Flock(int(l.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) != nil {
+		return 3
+	}
+	tmp := filepath.Join(dir, "ready.tmp")
+	if os.WriteFile(tmp, []byte(nonce), 0o600) != nil || os.Rename(tmp, filepath.Join(dir, "ready")) != nil {
+		return 4
+	}
+	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if _, err := os.Lstat(filepath.Join(dir, "release")); err == nil {
+			break
+		}
+	}
+	runtime.KeepAlive(l)
+	return 0
+}
+
+type markerFixture struct{ dir, nonce string }
+
+func newMarkerFixture(t *testing.T) *markerFixture {
+	t.Helper()
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		t.Fatal(err)
+	}
+	m := &markerFixture{dir: t.TempDir(), nonce: hex.EncodeToString(b)}
+	if err := os.WriteFile(filepath.Join(m.dir, "lock"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+func (m *markerFixture) spec(t *testing.T) Spec {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Spec{Path: exe, Env: []string{"BAW_PROC_HELPER=marker", "BAW_PROC_DIR=" + m.dir, "BAW_PROC_NONCE=" + m.nonce},
+		Timeout: 30 * time.Second, StdoutCap: 64, StderrCap: 64}
+}
+
+// held reports whether a fixture process holds the lock now.
+func (m *markerFixture) held() bool {
+	l, err := os.Open(filepath.Join(m.dir, "lock"))
+	if err != nil {
+		return false
+	}
+	defer l.Close()
+	err = syscall.Flock(int(l.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+	if err == nil {
+		syscall.Flock(int(l.Fd()), syscall.LOCK_UN)
+	}
+	return errors.Is(err, syscall.EWOULDBLOCK)
+}
+
+// awaitStarted waits at most d for the fixture's own ready marker with the
+// expected nonce while it is observed holding its lock.
+func (m *markerFixture) awaitStarted(d time.Duration) bool {
+	for deadline := time.Now().Add(d); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if b, err := os.ReadFile(filepath.Join(m.dir, "ready")); err == nil && string(b) == m.nonce && m.held() {
+			return true
+		}
+	}
+	return false
+}
+
+// reconcile releases the finite fixture and waits at most 10 seconds until
+// its lock is free, so it is independently known to have ended. It does not
+// rely on the runner having joined it.
+func (m *markerFixture) reconcile(t *testing.T) {
+	t.Helper()
+	os.WriteFile(filepath.Join(m.dir, "release"), nil, 0o600)
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if !m.held() {
+			return
+		}
+	}
+	t.Errorf("marker fixture in %s still holds its lock", m.dir)
+}
+
+// Watcher setup failure after a successful Start: the fault is injected only
+// after the fixture is independently visible as started (nonce marker and
+// held lock). Started stays true, so the command is never reported as not
+// started; legacy Run still says ErrStart. The leader is then joined only in
+// the background, so Joined stays false: the fixture's end is established by
+// its released lock, not by any wait having returned.
 func TestObservedWatcherSetupFailureAfterStart(t *testing.T) {
-	watchSetupFault = func() error { return errors.New("injected") }
-	defer func() { watchSetupFault = nil }()
-	marker := filepath.Join(t.TempDir(), "m")
-	_, o, err := obsSh(context.Background(), "touch '"+marker+"'; sleep 5", 5*time.Second)
-	if !o.Started || !o.WatcherFailed || o.Usable() || !errors.Is(err, ErrStart) {
-		t.Fatalf("%+v %v", o, err)
-	}
-	if _, err := Run(context.Background(), Spec{Path: "/bin/sh", Args: []string{"-c", "sleep 5"}, Timeout: time.Second, StdoutCap: 8, StderrCap: 8}); !errors.Is(err, ErrStart) {
-		t.Fatalf("legacy: %v", err)
+	for _, legacy := range []bool{false, true} {
+		m := newMarkerFixture(t)
+		established := false
+		watchSetupFault = func() error {
+			established = m.awaitStarted(10 * time.Second)
+			return errors.New("injected")
+		}
+		var o Observation
+		var err error
+		if legacy {
+			_, err = Run(context.Background(), m.spec(t))
+		} else {
+			_, o, err = RunObserved(context.Background(), m.spec(t))
+		}
+		watchSetupFault = nil
+		m.reconcile(t)
+		if !established {
+			t.Fatalf("legacy=%v: fault injected without an observed start marker", legacy)
+		}
+		if !errors.Is(err, ErrStart) {
+			t.Fatalf("legacy=%v: %v", legacy, err)
+		}
+		if !legacy && (!o.Started || !o.WatcherFailed || o.Usable() || o.Joined) {
+			t.Fatalf("%+v", o)
+		}
 	}
 }
 
+// Watcher runtime failure: the fault channel closes only after the fixture is
+// independently visible as started; the observation is unusable without
+// waiting for the timeout, and the fixture is reconciled by its lock.
 func TestObservedWatcherRuntimeFailure(t *testing.T) {
+	m := newMarkerFixture(t)
 	ch := make(chan struct{})
-	close(ch)
-	watchRuntimeFault = func() <-chan struct{} { return ch }
-	defer func() { watchRuntimeFault = nil }()
+	established := make(chan bool, 1)
+	watchRuntimeFault = func() <-chan struct{} {
+		go func() {
+			established <- m.awaitStarted(10 * time.Second)
+			close(ch)
+		}()
+		return ch
+	}
 	start := time.Now()
-	_, o, _ := obsSh(context.Background(), "sleep 30", 30*time.Second)
-	if !o.Started || !o.WatcherFailed || o.Usable() || time.Since(start) > 5*time.Second {
-		t.Fatalf("%+v after %v", o, time.Since(start))
+	_, o, err := RunObserved(context.Background(), m.spec(t))
+	elapsed := time.Since(start)
+	watchRuntimeFault = nil
+	ok := <-established
+	<-ch
+	m.reconcile(t)
+	if !ok {
+		t.Fatal("runtime fault injected without an observed start marker")
+	}
+	if !o.Started || !o.WatcherFailed || o.Usable() || !errors.Is(err, ErrCleanup) || elapsed > 15*time.Second {
+		t.Fatalf("%+v %v after %v", o, err, elapsed)
 	}
 }
 
-// Actual pipe EOF versus a reader that ended for another reason.
-func TestObservedPipeEOFVersusReadError(t *testing.T) {
-	readFaultHook = func(stdout bool) bool { return stdout }
-	_, o, err := obsSh(context.Background(), "printf ok", 5*time.Second)
-	readFaultHook = nil
-	if err != nil || o.StdoutEOF || !o.StderrEOF || o.Usable() {
-		t.Fatalf("read error must not count as EOF: %+v %v", o, err)
+var errInjectedRead = errors.New("injected read error")
+
+// failingReader passes through the actual pipe reads until real bytes have
+// arrived, then fails with a non-EOF error before any EOF was seen.
+type failingReader struct {
+	r        io.Reader
+	got      int
+	sawEOF   bool
+	injected bool
+}
+
+func (f *failingReader) Read(b []byte) (int, error) {
+	if f.got > 0 {
+		f.injected = true
+		return 0, errInjectedRead
+	}
+	n, err := f.r.Read(b)
+	f.got += n
+	if err == io.EOF {
+		f.sawEOF = true
+	}
+	return n, err
+}
+
+// A non-EOF read failure at the reader boundary of one stream, distinct from
+// forced closure: that stream's EOF is not established and the observation is
+// unusable, while the other stream's actual EOF and the exit/join/group facts
+// are observed independently. Run's result for the same failure is unchanged
+// (it returns the bytes read before the failure and no error).
+func TestObservedPipeReadErrorIsNotEOF(t *testing.T) {
+	for _, onStdout := range []bool{true, false} {
+		for _, legacy := range []bool{false, true} {
+			var fr *failingReader
+			pipeReader = func(r io.Reader, stdout bool) io.Reader {
+				if stdout != onStdout {
+					return r
+				}
+				fr = &failingReader{r: r}
+				return fr
+			}
+			spec := Spec{Path: "/bin/sh", Args: []string{"-c", "printf ok; printf er >&2"}, Timeout: 5 * time.Second, StdoutCap: 64, StderrCap: 64}
+			var out []byte
+			var o Observation
+			var err error
+			if legacy {
+				out, err = Run(context.Background(), spec)
+			} else {
+				out, o, err = RunObserved(context.Background(), spec)
+			}
+			pipeReader = nil
+			if fr == nil || !fr.injected || fr.sawEOF || fr.got == 0 {
+				t.Fatalf("stdout=%v: read failure not injected after real bytes before EOF: %+v", onStdout, fr)
+			}
+			if err != nil || string(out) != "ok" {
+				t.Fatalf("stdout=%v legacy=%v: result %q %v", onStdout, legacy, out, err)
+			}
+			if legacy {
+				continue
+			}
+			if o.StdoutEOF == onStdout || o.StderrEOF != onStdout || o.Usable() {
+				t.Fatalf("stdout=%v: read error counted as EOF: %+v", onStdout, o)
+			}
+			if !(o.Started && o.Exited && o.ExitCode == 0 && o.Joined && o.GroupAbsent) {
+				t.Fatalf("stdout=%v: other facts %+v", onStdout, o)
+			}
+		}
 	}
 }
 

@@ -208,13 +208,23 @@ func strictValue(dec *json.Decoder) (any, error) {
 	}
 }
 
-// planHook is an internal test seam for the plan file close; production
-// code never sets it.
+// planHook is an internal test seam at the plan file open ("open", after the
+// safe Lstat and before the open), read ("read", after the bytes were read)
+// and close ("close", after the actual close) boundaries; a returned error is
+// treated as that operation's failure. Production code never sets it.
 var planHook func(stage string) error
 
+func planAt(stage string) error {
+	if planHook != nil {
+		return planHook(stage)
+	}
+	return nil
+}
+
 // ReadPlan safely reads and parses the plan file. Safety checks precede the
-// identity check on the opened file; the first applicable failure wins and a
-// close error is reported only when nothing failed earlier.
+// identity check on the opened file; the first applicable failure wins. The
+// descriptor is always closed, and a close error is reported only when the
+// safety checks, the read and the parser all succeeded.
 func ReadPlan(path string) ([]byte, Plan, error) {
 	var p Plan
 	abs, err := filepath.Abs(path)
@@ -233,6 +243,9 @@ func ReadPlan(path string) ([]byte, Plan, error) {
 	if err := planSafety(lfi); err != nil {
 		return nil, p, err
 	}
+	if err := planAt("open"); err != nil {
+		return nil, p, fail(CodePlanUnavailable)
+	}
 	f, err := os.OpenFile(phys, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ELOOP) {
@@ -242,19 +255,18 @@ func ReadPlan(path string) ([]byte, Plan, error) {
 	}
 	observe(f)
 	data, perr := readOpened(f, lfi)
+	if perr == nil {
+		p, perr = ParsePlan(data)
+	}
 	cerr := f.Close()
-	if planHook != nil && cerr == nil {
-		cerr = planHook("close")
+	if cerr == nil {
+		cerr = planAt("close")
 	}
 	if perr != nil {
-		return nil, p, perr
+		return nil, Plan{}, perr
 	}
 	if cerr != nil {
-		return nil, p, fail(CodePlanUnavailable)
-	}
-	p, err = ParsePlan(data)
-	if err != nil {
-		return nil, p, err
+		return nil, Plan{}, fail(CodePlanUnavailable)
 	}
 	return data, p, nil
 }
@@ -271,6 +283,9 @@ func readOpened(f *os.File, lfi fs.FileInfo) ([]byte, error) {
 		return nil, fail(CodeStateChanged)
 	}
 	data, err := io.ReadAll(io.LimitReader(f, MaxPlanBytes+1))
+	if err == nil {
+		err = planAt("read")
+	}
 	if err != nil {
 		return nil, fail(CodePlanUnavailable)
 	}

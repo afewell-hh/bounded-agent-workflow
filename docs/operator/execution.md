@@ -82,6 +82,9 @@ lowercase hex characters naming an existing run record.
   symlink (the [run record](run-records.md) state contract).
 - `--plan` is a current-user `0600` regular file with no special bits and not a
   final symlink, read without following it and without blocking on a FIFO.
+  The opened file's type, owner and mode are checked before its identity, then
+  it is read and parsed; it is always closed, and a close error gives
+  `plan_unavailable` only when none of those checks failed.
 - The state directory and plan must be outside the worktree, and the derived
   `DIR/execute-v1` must be neither the worktree, inside it nor contain it
   (path components, not text prefixes): `repo=/state/project` is allowed,
