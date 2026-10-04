@@ -22,6 +22,7 @@ const Usage = `Usage:
   baw status --state-dir DIR --run-id ID [--json]
   baw run diagnose --state-dir DIR --run-id ID [--json]
   baw context --repo PATH --role ROLE [--json]
+  baw run execute --repo PATH --state-dir DIR --run-id ID --plan FILE [--json]
   baw --help
 
 baw inspect reports read-only Git state counts, fixed maintained-source
@@ -42,6 +43,9 @@ reviewer with the same read-only Git observations. It grants no assignment,
 readiness or authority and starts no agent.
 
 Exit status: 0 success, 1 failure (stderr "baw: CODE"), 2 invalid usage.
+
+Run execute records one local worker and verification attempt; it evaluates no approval,
+provides no native adapter and never retries or recovers an interrupted attempt.
 `
 
 var checkpointRE = regexp.MustCompile(`^(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$`)
@@ -130,6 +134,9 @@ func RunWithLimits(args []string, stdout, stderr io.Writer, limits inspect.Limit
 }
 
 func run(args []string, stdout, stderr io.Writer, limits *inspect.Limits) int {
+	if isExecute(args) {
+		return runExecute(args, stdout, stderr)
+	}
 	if len(args) > 0 && (args[0] == "run" || args[0] == "status") {
 		return runRecord(args, stdout, stderr, limits)
 	}

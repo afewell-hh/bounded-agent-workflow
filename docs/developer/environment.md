@@ -6,7 +6,9 @@ to this tooling repository. The module `github.com/afewell-hh/bounded-agent-work
 (minimum Go 1.27.0, standard library only) provides `cmd/baw` with the read-only
 [`baw inspect`](../operator/inspect.md) command, the local
 [run-record commands](../operator/run-records.md), the read-only
-[`baw context`](../operator/context.md) command and their tests. See the last section for
+[`baw context`](../operator/context.md) command, the
+[`baw run execute`](../operator/execution.md) local worker/verifier primitive (exercised only
+with compiled fake programs; no native agent adapter) and their tests. See the last section for
 which checks have actually run and what remains unvalidated.
 
 ## Selected toolchain
@@ -200,6 +202,14 @@ The Go toolchain, offline settings and sandbox permissions are the same as above
 `TestDiagnoseSocketRecord` runs its diagnose in a child of the test binary bounded to
 10 seconds and always waited for.
 
+`TestReadPlanFileSafety` in `internal/execution` uses the same choice for its socket plan
+case: with the variable set it reads the socket at that same record path as a plan and
+expects `unsafe_state_path`; otherwise a child of the test binary binds the short
+relative name `p` in a new `0700` directory under `TMPDIR`. Either way the test checks the
+path is actually a socket and that its mode, size, inode and modification time are
+unchanged afterwards, and every plan read runs in a child bounded to 10 seconds and
+always waited for.
+
 ### Special-bit fixture
 
 `TestDiagnoseSpecialBits` in `internal/state` checks that diagnose rejects an actual
@@ -221,6 +231,26 @@ creates or removes anything there, and confirms listings, bytes and metadata (mo
 owner, inode, link count, size, modification time) are unchanged. Only tests read this
 variable; `baw` does not. Creating the fixture needs one `chmod` by a host process
 outside the restricted environment; it is metadata test data, not a program or service.
+
+`TestReadPlanFileSafety` in `internal/execution` reads `final/records-v1/00112233445566778899aabbccddeeff.json`
+from the same fixture as a setuid plan when the variable is set, otherwise a plan file it
+creates with mode `04600`; it fails unless the observed mode is exactly a regular `04600`
+file and expects `state_permissions`.
+
+Its setgid plan case uses a separate test-only variable, `BAW_TEST_EXEC_SETGID_PLAN`,
+because some restricted environments likewise leave a requested `02600` file at `0600`.
+Unset, the test writes its own plan file under `TMPDIR`, sets mode `02600` and checks
+the mode actually observed. Set (for the test command only), it must name an absolute
+path to an existing current-user, single-link, non-executable regular file with mode
+exactly `02600` (no setuid or sticky bit); its content is irrelevant because the mode
+check precedes reading. The test validates type, owner, link count and mode itself and
+fails, never skips or falls back, if the file is missing or differs. It only reads the
+file in a bounded child expecting `state_permissions`, never changes modes, links,
+writes or removes anything, and confirms its bytes, metadata (mode, owner, device,
+inode, link count, size, modification and change time) and its directory's listing
+are unchanged. Only tests read this variable; `baw` does not. Creating the file needs
+one `chmod` by a host process outside the restricted environment. The default route
+(variable unset) remains a required host check; the supplied file does not replace it.
 
 ## Checks actually executed and remaining validation
 
@@ -277,6 +307,18 @@ supplied socket and special-bit fixtures; that is the worker's claim only. Indep
 review, default host gates (both fixture variables unset), integration and closeout
 results are recorded on the implementation ticket
 ([#15](https://github.com/afewell-hh/bounded-agent-workflow/issues/15)), not here.
+
+For `baw run execute`, an independent review of a committed candidate observed the full
+`go test` fail in its native sandbox: the plan test's own `chmod` to `02600` reported
+success but left `0600`, and that case had no supplied-fixture route. It also found that
+a plan close error could mask parser errors (malformed JSON, invalid UTF-8, unsupported
+schema), duplicate-key fixtures without any `\u` escape, no opened-file
+safety-versus-identity or read-plus-close fixtures, a pipe "read error" seam that only
+hid an EOF already reached, and watcher-failure tests that never checked a start
+marker. The parser now runs before a close-only error is chosen, and the tests were
+reworked as described in [verification](verification.md#implemented-slice-gates-execute)
+and [special-bit fixture](#special-bit-fixture). Review, gate and integration results
+are recorded on [ticket #18](https://github.com/afewell-hh/bounded-agent-workflow/issues/18), not here.
 
 This CLI profile applies to BAW development. Future application adopters validate their
 own environment using [project adoption](../operator/project-adoption.md), including

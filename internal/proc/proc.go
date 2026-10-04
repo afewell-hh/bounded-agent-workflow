@@ -21,11 +21,15 @@
 // that, stops waiting after JoinBound and fails. Group members this user
 // cannot signal (for example after a privilege change) are not visible to the
 // membership check. On platforms without an exit watcher Run fails closed.
+//
+// RunObserved shares the same supervision and additionally reports the facts
+// it established (Observation); it adds no containment beyond the above.
 package proc
 
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"sync"
@@ -53,9 +57,37 @@ type Spec struct {
 	Path      string
 	Args      []string // argv[1:]
 	Env       []string
+	Dir       string // working directory; empty keeps the caller's
 	Timeout   time.Duration
 	StdoutCap int
 	StderrCap int
+}
+
+// Observation holds the facts RunObserved established about one invocation.
+// They are independent of the legacy error value.
+type Observation struct {
+	Started       bool // Start returned success
+	Exited        bool // a normal exit status is known
+	ExitCode      int  // valid only when Exited
+	Signaled      bool // the leader terminated by a signal
+	Joined        bool // the leader was reaped synchronously
+	GroupAbsent   bool // no signalable owned-group member remained before reaping
+	StdoutEOF     bool // stdout reached actual EOF
+	StderrEOF     bool // stderr reached actual EOF
+	WatcherFailed bool // exit watcher setup or runtime failure
+	TimedOut      bool
+	Cancelled     bool
+	OutputLimit   bool
+}
+
+// Usable reports whether the invocation started, exited normally, was
+// joined, left no signalable owned-group member and closed both pipes with
+// actual EOF, without timeout, cancellation, output cap or watcher failure.
+// Escaped or unsignalable descendants are outside these facts.
+func (o Observation) Usable() bool {
+	return o.Started && o.Exited && !o.Signaled && o.Joined && o.GroupAbsent &&
+		o.StdoutEOF && o.StderrEOF && !o.WatcherFailed && !o.TimedOut &&
+		!o.Cancelled && !o.OutputLimit
 }
 
 // GracePeriod is the wait between SIGTERM and SIGKILL of an owned group.
@@ -67,6 +99,15 @@ var JoinBound = time.Second
 
 const pollInterval = 10 * time.Millisecond
 
+// Internal test seams; production code never sets them.
+var (
+	watchSetupFault   func() error
+	watchRuntimeFault func() <-chan struct{}
+	// pipeReader may wrap a pipe's reader, e.g. to inject a non-EOF read
+	// error at the reader boundary.
+	pipeReader func(r io.Reader, stdout bool) io.Reader
+)
+
 // capture drains one pipe, keeping at most limit bytes. Bytes beyond the limit
 // are read and discarded so writers never block, and mark the stream exceeded.
 type capture struct {
@@ -76,21 +117,31 @@ type capture struct {
 	n        int
 	limit    int
 	exceeded bool
+	eof      bool // the reader ended on actual EOF, not a forced close or error
 	over     chan struct{}
 	done     chan struct{}
 }
 
 func newCapture(f *os.File, limit int, keep bool) *capture {
 	c := &capture{limit: limit, keep: keep, over: make(chan struct{}), done: make(chan struct{})}
+	var r io.Reader = f
+	if pipeReader != nil {
+		r = pipeReader(f, keep)
+	}
 	go func() {
 		defer close(c.done)
 		b := make([]byte, 32<<10)
 		for {
-			n, err := f.Read(b)
+			n, err := r.Read(b)
 			if n > 0 {
 				c.add(b[:n])
 			}
 			if err != nil {
+				if err == io.EOF {
+					c.mu.Lock()
+					c.eof = true
+					c.mu.Unlock()
+				}
 				return
 			}
 		}
@@ -116,10 +167,10 @@ func (c *capture) add(p []byte) {
 	}
 }
 
-func (c *capture) result() ([]byte, bool) {
+func (c *capture) result() ([]byte, bool, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.buf, c.exceeded
+	return c.buf, c.exceeded, c.eof
 }
 
 // groupLive reports whether the owned group has a member this process may
@@ -161,32 +212,62 @@ func closeAll(fs ...*os.File) {
 // Run executes spec under ctx and returns captured stdout. Stderr is counted
 // against its cap and never stored or returned.
 func Run(ctx context.Context, spec Spec) ([]byte, error) {
+	out, _, err := run(ctx, spec, false)
+	return out, err
+}
+
+// RunObserved is Run that also reports the facts it established. Unlike Run
+// it checks ctx before Start (a cancelled command is never started) and it
+// treats an exit-watcher runtime failure as a failure instead of waiting for
+// the timeout. Its error value follows Run; use the Observation for
+// classification.
+func RunObserved(ctx context.Context, spec Spec) ([]byte, Observation, error) {
+	return run(ctx, spec, true)
+}
+
+func run(ctx context.Context, spec Spec, observe bool) ([]byte, Observation, error) {
+	var obs Observation
+	if observe && ctx.Err() != nil {
+		obs.Cancelled = true
+		return nil, obs, ErrStart
+	}
 	outR, outW, err := os.Pipe()
 	if err != nil {
-		return nil, ErrStart
+		return nil, obs, ErrStart
 	}
 	errR, errW, err := os.Pipe()
 	if err != nil {
 		closeAll(outR, outW)
-		return nil, ErrStart
+		return nil, obs, ErrStart
 	}
 	cmd := &exec.Cmd{Path: spec.Path, Args: append([]string{spec.Path}, spec.Args...), Env: spec.Env,
-		Stdout: outW, Stderr: errW, SysProcAttr: &syscall.SysProcAttr{Setpgid: true}}
+		Dir: spec.Dir, Stdout: outW, Stderr: errW, SysProcAttr: &syscall.SysProcAttr{Setpgid: true}}
 	if err := cmd.Start(); err != nil {
 		closeAll(outR, outW, errR, errW)
-		return nil, ErrStart
+		return nil, obs, ErrStart
 	}
+	obs.Started = true
 	closeAll(outW, errW)
 	pgid := cmd.Process.Pid
 
-	exited, err := watchExit(pgid)
+	exited, watchFailed, err := watchExit(pgid)
+	if err == nil && watchSetupFault != nil {
+		err = watchSetupFault()
+	}
 	if err != nil {
 		// Without an exit watcher the group cannot be supervised safely. The
 		// leader is still unreaped, so its group may be signalled.
 		signalOwned(pgid, syscall.SIGKILL)
 		closeAll(outR, errR)
 		go cmd.Wait()
-		return nil, ErrStart
+		obs.WatcherFailed = true
+		return nil, obs, ErrStart
+	}
+	switch {
+	case !observe:
+		watchFailed = nil // Run keeps waiting for its timeout, as before.
+	case watchRuntimeFault != nil:
+		watchFailed = watchRuntimeFault()
 	}
 	stdout := newCapture(outR, spec.StdoutCap, true)
 	stderr := newCapture(errR, spec.StderrCap, false)
@@ -199,12 +280,17 @@ func Run(ctx context.Context, spec Spec) ([]byte, error) {
 	case <-exited:
 	case <-timer.C:
 		failure = ErrTimeout
+		obs.TimedOut = true
 	case <-ctx.Done():
 		failure = ErrTimeout
+		obs.Cancelled = true
 	case <-stdout.over:
 		failure = ErrOutputLimit
 	case <-stderr.over:
 		failure = ErrOutputLimit
+	case <-watchFailed:
+		failure = ErrCleanup
+		obs.WatcherFailed = true
 	}
 
 	// Cleanup: leader exit is not group extinction.
@@ -240,28 +326,40 @@ func Run(ctx context.Context, spec Spec) ([]byte, error) {
 	var waitErr error
 	select {
 	case <-exited:
+		obs.GroupAbsent = cleaned
 		waitErr = cmd.Wait()
+		obs.Joined = true
+		if ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok {
+			switch {
+			case ws.Exited():
+				obs.Exited, obs.ExitCode = true, ws.ExitStatus()
+			case ws.Signaled():
+				obs.Signaled = true
+			}
+		}
 	default:
 		cleaned = false
 		go cmd.Wait()
 	}
 
-	out, outOver := stdout.result()
-	_, errOver := stderr.result()
+	out, outOver, outEOF := stdout.result()
+	_, errOver, errEOF := stderr.result()
+	obs.OutputLimit = outOver || errOver
+	obs.StdoutEOF, obs.StderrEOF = outEOF, errEOF
 	switch {
 	case failure != nil:
-		return nil, failure
+		return nil, obs, failure
 	case outOver || errOver:
-		return nil, ErrOutputLimit
+		return nil, obs, ErrOutputLimit
 	case !cleaned || !pipesClosed:
-		return nil, ErrCleanup
+		return nil, obs, ErrCleanup
 	}
 	if waitErr != nil {
 		var ee *exec.ExitError
 		if errors.As(waitErr, &ee) {
-			return nil, &ExitError{Code: ee.ExitCode()}
+			return nil, obs, &ExitError{Code: ee.ExitCode()}
 		}
-		return nil, ErrStart
+		return nil, obs, ErrStart
 	}
-	return out, nil
+	return out, obs, nil
 }

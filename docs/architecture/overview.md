@@ -32,6 +32,9 @@ Implemented so far: `cmd/baw`, `internal/cli`, `internal/inspect`, `internal/pro
 [run record](../operator/run-records.md) store; run/session recovery is still future.
 `internal/inspect` serves both the fixed lead source list of `baw inspect` and the
 per-request role source list of [`baw context`](../operator/context.md).
+`internal/execution` implements [`baw run execute`](../operator/execution.md): one recorded
+local worker and verifier attempt in its own `execute-v1` namespace, using the observed
+runner of `internal/proc`; it has no native agent adapter, approval evaluation or recovery.
 
 Do not create all empty packages before they are needed. Begin with the smallest tested
 read-only slice. Interface/state choices require an approved specification before
