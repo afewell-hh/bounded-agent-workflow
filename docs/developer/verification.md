@@ -2,7 +2,8 @@
 
 **Current state:** the read-only `baw inspect` slice, the local
 [run-record](../operator/run-records.md) `baw run create`/`baw status`/`baw run diagnose`
-foundation and the read-only [`baw context`](../operator/context.md) role reference list
+foundation, the read-only [`baw context`](../operator/context.md) role reference list and
+the [`baw run execute`](../operator/execution.md) local worker/verifier primitive
 are implemented. Packaging checks are not execution tests. The earlier Python prototype's
 test count is not evidence that a new Go implementation behaves correctly. Everything
 below those slices remains a future requirement.
@@ -160,6 +161,50 @@ hand-written expected bytes, the [documentation example](../operator/context.md#
 compared with the documented output and its six references followed from the worktree
 top level, subdirectory input, usage/role/repository/symlink failures and a fake `gh`
 that must never run. An unavailable SHA-256 fixture fails rather than skips.
+
+## Implemented slice gates: execute
+
+The context gates apply, plus `TestExecutionBinaryJourneys` (same `-baw-binary` and
+`-journey-dir` flags, `-v`, must show RUN/PASS and no skip) against the same built artifact.
+It uses a private copy of its own compiled test binary as the fake worker and verifier: both
+object formats and both outputs succeed with hand-written packets, independently counted
+starts and the worker's file bytes checked by the verifier; a nonzero worker never admits the
+verifier; repeats give `execution_exists`; a refused stdout gives `execution_uncertain` with
+the result retained; real SIGINT and SIGTERM during the worker give the published
+`worker_unverified` packet and the harness confirms its recorded fake process is gone; the
+[documentation example](../operator/execution.md#how-to-run-a-disposable-example) is followed.
+
+- `internal/execution`: strict plan parser (byte cap, raw integers, escaped duplicate keys,
+  argument limits), plan file safety and precedence with each read in a child of the test
+  binary bounded to 10 seconds and always waited for (symlink, FIFO, directory, an actual
+  socket and observed setuid/setgid modes via the
+  [socket](environment.md#socket-fixture) and
+  [special-bit](environment.md#special-bit-fixture) fixture choices, close errors),
+  layout/alias/prefix-sibling and executable checks, every §7 row with real fake programs
+  or in-package seams, fault injection at every scratch/intent/result/delivery stage (no
+  start before intent, retained evidence after the verifier started), deterministic
+  cancellation at each admission and receipt boundary, and concurrent same-ID calls
+  starting one worker. `probe_test.go` adds a hand-written stage table covering every
+  namespace, root, ID, scratch (create, mode, open, recheck, Sync, close for all six
+  directories), intent, result and delivery boundary with its expected code, attempt
+  presence and independently counted starts; at each stage every plan, directory and
+  staging `*os.File` the package opened is retained by a test-only observer and must
+  report `os.ErrClosed` from `Stat` afterwards (a successful run opens exactly 14). A
+  replaced or loosened state root between its `Lstat` and open is refused before any
+  attempt exists. A controller child killed with SIGKILL while its worker holds leaves
+  the intent and no result, and a repeat refuses with no added start; the harness joins
+  the controller through its own handle, releases the worker it launched and observes
+  it finish, and never signals a stored ID. These are tests of one host's behavior,
+  not a power-loss or containment claim.
+- `internal/inspect` (`top_test.go`): `InspectTop` returns the same packet or error as
+  `Inspect` and the physical top level for both object formats, a subdirectory and a
+  symlinked alias.
+- `internal/proc` (`observed_test.go`): observed facts for normal exit, signal, timeout,
+  caps, cancellation before Start, Start failure, watcher setup/runtime failure after Start,
+  actual pipe EOF versus a reader error or forced close, and `Spec.Dir`; the existing
+  `proc_test.go` regressions keep covering legacy `Run`.
+- `internal/cli` (`execute_test.go`): frozen global and execute help bytes, syntax errors and
+  restoration of the caller's signal handling after execute returns.
 
 - `internal/inspect` (`profile_test.go`, `state_table_test.go`): hand-written source
   lists per role and the unchanged legacy list; parsers given synthetic Git records keep

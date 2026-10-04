@@ -239,7 +239,8 @@ another merge approval. Initial methodology adoption, live smoke tests and conse
 policy changes remain explicitly supervised. The implemented commands are the
 read-only [`baw inspect`](inspect.md) and [`baw run create` / `baw status` / `baw run diagnose`](run-records.md),
 which save, display and read-only diagnose a local record of supplied references, and the read-only
-[`baw context`](context.md) role reference list; they grant no authority.
+[`baw context`](context.md) role reference list, and [`baw run execute`](execution.md), one
+recorded trusted local worker and verifier attempt; they grant no authority.
 Controller, dispatch, recovery, gate and merge surfaces remain future work.
 
 Native checks and explicit scopes reduce ordinary drift, but full shared-account/OS

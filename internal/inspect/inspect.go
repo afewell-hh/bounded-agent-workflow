@@ -87,8 +87,25 @@ func Inspect(opts Options) (*Packet, error) {
 	return inspect(opts, legacyProfile())
 }
 
+// InspectTop is Inspect that also returns the resolved physical Git top
+// level used by the inspection. The packet, guards and limits are those of
+// Inspect; the top level is returned only with a complete packet.
+func InspectTop(opts Options) (*Packet, string, error) {
+	var top string
+	p, err := inspectInto(opts, legacyProfile(), &top)
+	if err != nil {
+		return nil, "", err
+	}
+	return p, top, nil
+}
+
 // inspect is Inspect with the maintained sources taken from prof.
 func inspect(opts Options, prof sourceProfile) (*Packet, error) {
+	return inspectInto(opts, prof, nil)
+}
+
+// inspectInto is inspect that also stores the resolved top level in topOut.
+func inspectInto(opts Options, prof sourceProfile, topOut *string) (*Packet, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), opts.Limits.Total)
 	defer cancel()
 
@@ -120,6 +137,9 @@ func inspect(opts Options, prof sourceProfile) (*Packet, error) {
 		return nil, err
 	}
 	g.dir = top
+	if topOut != nil {
+		*topOut = top
+	}
 	if err := g.guardConfig(); err != nil {
 		return nil, err
 	}
