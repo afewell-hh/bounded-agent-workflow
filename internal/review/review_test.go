@@ -888,6 +888,7 @@ func TestReviewCancellationBoundaries(t *testing.T) {
 		{"ns-chmod", "review_cancelled", false, true},
 		{"root-sync", "review_cancelled", false, true},
 		{"ns-recheck", "review_cancelled", false, true},
+		{"id-mkdir", "review_cancelled", false, true},
 		{"id-chmod", "review_uncertain", true, true},
 		{"reviewer-home-mkdir", "review_uncertain", true, true},
 	} {
@@ -1224,6 +1225,341 @@ func TestReviewResultValidator(t *testing.T) {
 	} {
 		if validResult([]byte(s), testID) {
 			t.Errorf("%s accepted", name)
+		}
+	}
+}
+
+// Cancellation seen at the final boundary before the exclusive ID mkdir is
+// review_cancelled with no owned ID, zero starts and empty output; the
+// namespace descriptor held at that boundary is actually closed.
+func TestReviewCancelAtIDMkdirBoundary(t *testing.T) {
+	defer func() { hook, opened = nil, nil }()
+	for _, format := range []string{"sha1", "sha256"} {
+		for _, asJSON := range []bool{true, false} {
+			f := newFx(t, format, "pass")
+			ctx, cancel := context.WithCancel(context.Background())
+			hits := 0
+			var mine, openAtHit []*os.File
+			hook = func(stage string) error {
+				if stage == "id-mkdir" {
+					hits++
+					for _, d := range mine {
+						if _, err := d.Stat(); err == nil {
+							openAtHit = append(openAtHit, d)
+						}
+					}
+					cancel()
+				}
+				return nil
+			}
+			d := &descriptors{}
+			opened = func(x *os.File) { d.add(x); mine = append(mine, x) }
+			var outb bytes.Buffer
+			passed, err := Review(ctx, f.req(f.head, asJSON), &outb)
+			hook, opened = nil, nil
+			cancel()
+			d.assertClosed(t, "id-mkdir cancel")
+			name := format + " json=" + map[bool]string{true: "true", false: "false"}[asJSON]
+			if err == nil || err.Error() != "review_cancelled" || outb.Len() != 0 || passed || hits != 1 {
+				t.Errorf("%s: %v out %q passed %v hits %d", name, err, outb.String(), passed, hits)
+			}
+			ns := filepath.Join(f.state, Namespace)
+			if len(openAtHit) != 1 || openAtHit[0].Name() != ns {
+				t.Errorf("%s: descriptors open at id-mkdir %d, want only the namespace", name, len(openAtHit))
+			}
+			for _, x := range openAtHit {
+				if _, err := x.Stat(); !errors.Is(err, os.ErrClosed) {
+					t.Errorf("%s: namespace descriptor not closed", name)
+				}
+			}
+			if _, e := os.Lstat(f.attempt()); e == nil {
+				t.Errorf("%s: ID owned after pre-ID cancellation", name)
+			}
+			if es, err := os.ReadDir(ns); err != nil || len(es) != 0 {
+				t.Errorf("%s: namespace not retained empty: %v %d", name, err, len(es))
+			}
+			if f.starts() != 0 {
+				t.Errorf("%s: starts %d", name, f.starts())
+			}
+		}
+	}
+}
+
+// Identified state safety errors found by the acquisition rechecks of the
+// state root and namespace before the exclusive ID mkdir are retained rather
+// than collapsed into review_storage_unavailable (TestReviewStageFaults keeps
+// injected generic faults at the same stages as storage failures). Each row
+// really changes the state at one named boundary, and the change is
+// confirmed independently with Lstat after the run. Safety precedes
+// identity: a replaced root that is also 0755 is state_permissions.
+func TestReviewAcquisitionSafetyRechecks(t *testing.T) {
+	defer func() { hook, opened = nil, nil }()
+	type row struct {
+		name, stage, want string
+		existingNS        bool
+		change            func(t *testing.T, f *fx)
+		fact              func(f *fx) bool
+	}
+	ns := func(f *fx) string { return filepath.Join(f.state, Namespace) }
+	mode := func(p string, perm os.FileMode) bool {
+		fi, err := os.Lstat(p)
+		return err == nil && fi.IsDir() && fi.Mode().Perm() == perm
+	}
+	symlink := func(p string) bool { fi, err := os.Lstat(p); return err == nil && fi.Mode()&os.ModeSymlink != 0 }
+	replaced := func(p string) bool {
+		a, err1 := os.Lstat(p)
+		b, err2 := os.Lstat(p + ".orig")
+		return err1 == nil && err2 == nil && a.IsDir() && b.IsDir() && !os.SameFile(a, b)
+	}
+	replace := func(t *testing.T, p string, perm os.FileMode) {
+		if err := os.Rename(p, p+".orig"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(p, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		os.Chmod(p, perm)
+	}
+	toSymlink := func(t *testing.T, p string) {
+		if err := os.Rename(p, p+".real"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(p+".real", p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows := []row{
+		{"root 0755 after namespace creation", "ns-chmod", "state_permissions", false,
+			func(t *testing.T, f *fx) { os.Chmod(f.state, 0o755) }, func(f *fx) bool { return mode(f.state, 0o755) }},
+		{"root 0755 with existing namespace", "ns-mkdir", "state_permissions", true,
+			func(t *testing.T, f *fx) { os.Chmod(f.state, 0o755) }, func(f *fx) bool { return mode(f.state, 0o755) }},
+		{"root symlink", "ns-chmod", "unsafe_state_path", false,
+			func(t *testing.T, f *fx) { toSymlink(t, f.state) }, func(f *fx) bool { return symlink(f.state) }},
+		{"root 0755 on the opened descriptor", "root-open", "state_permissions", false,
+			func(t *testing.T, f *fx) { os.Chmod(f.state, 0o755) }, func(f *fx) bool { return mode(f.state, 0o755) }},
+		{"root replaced before open", "root-lstat", "state_changed", false,
+			func(t *testing.T, f *fx) { replace(t, f.state, 0o700) },
+			func(f *fx) bool { return replaced(f.state) && mode(f.state, 0o700) }},
+		{"root replaced 0755: safety before identity", "root-lstat", "state_permissions", false,
+			func(t *testing.T, f *fx) { replace(t, f.state, 0o755) },
+			func(f *fx) bool { return replaced(f.state) && mode(f.state, 0o755) }},
+		{"namespace 0755", "ns-open", "state_permissions", false,
+			func(t *testing.T, f *fx) { os.Chmod(ns(f), 0o755) }, func(f *fx) bool { return mode(ns(f), 0o755) }},
+		{"namespace symlink", "ns-open", "unsafe_state_path", false,
+			func(t *testing.T, f *fx) { toSymlink(t, ns(f)) }, func(f *fx) bool { return symlink(ns(f)) }},
+		{"namespace removed", "ns-open", "state_changed", false,
+			func(t *testing.T, f *fx) {
+				if err := os.Rename(ns(f), ns(f)+".orig"); err != nil {
+					t.Fatal(err)
+				}
+			},
+			func(f *fx) bool { _, err := os.Lstat(ns(f)); return os.IsNotExist(err) && mode(ns(f)+".orig", 0o700) }},
+	}
+	for _, format := range []string{"sha1", "sha256"} {
+		for _, r := range rows {
+			name := format + " " + r.name
+			f := newFx(t, format, "pass")
+			if r.existingNS {
+				mkdir0700(t, ns(f))
+			}
+			if !mode(f.state, 0o700) {
+				t.Fatalf("%s: root not 0700 before the run", name)
+			}
+			hits := 0
+			var mine, openAtHit []*os.File
+			hook = func(stage string) error {
+				if stage == r.stage {
+					hits++
+					for _, d := range mine {
+						if _, err := d.Stat(); err == nil {
+							openAtHit = append(openAtHit, d)
+						}
+					}
+					r.change(t, f)
+				}
+				return nil
+			}
+			d := &descriptors{}
+			opened = func(x *os.File) { d.add(x); mine = append(mine, x) }
+			var outb bytes.Buffer
+			passed, err := Review(context.Background(), f.req(f.head, true), &outb)
+			hook, opened = nil, nil
+			d.assertClosed(t, name)
+			if err == nil || err.Error() != r.want || outb.Len() != 0 || passed || hits != 1 {
+				t.Errorf("%s: %v out %q hits %d want %s", name, err, outb.String(), hits, r.want)
+			}
+			if !r.fact(f) {
+				t.Errorf("%s: state change not independently observed", name)
+			}
+			if (r.stage == "root-open") != (len(openAtHit) == 1) {
+				t.Errorf("%s: %d descriptors open at %s", name, len(openAtHit), r.stage)
+			}
+			for _, x := range openAtHit {
+				if _, err := x.Stat(); !errors.Is(err, os.ErrClosed) {
+					t.Errorf("%s: descriptor open at the change was not closed", name)
+				}
+			}
+			for _, p := range []string{ns(f), ns(f) + ".orig", ns(f) + ".real", filepath.Join(f.state+".orig", Namespace),
+				filepath.Join(f.state+".real", Namespace)} {
+				if _, e := os.Lstat(filepath.Join(p, testID)); e == nil {
+					t.Errorf("%s: owned ID under %s", name, p)
+				}
+			}
+			if f.starts() != 0 {
+				t.Errorf("%s: starts %d", name, f.starts())
+			}
+		}
+	}
+}
+
+// A read fault and a distinct close fault on the same plan or receipt: the
+// earlier read error wins, both seams are reached exactly once (the close
+// really ran), and the descriptor held at the read fault is actually closed.
+// Under C2 the read and close faults of one file map to the same code, so
+// the hit counts and closure, not the code, show both faults occurred.
+func TestReviewSafeReadReadAndCloseFaults(t *testing.T) {
+	defer func() { readHook, opened = nil, nil }()
+	for _, c := range []struct{ name, want string }{
+		{"plan", "plan_unavailable"}, {"intent", "execution_receipt_unavailable"}, {"result", "execution_receipt_unavailable"},
+	} {
+		f := newFx(t, "sha1", "pass")
+		target := map[string]string{"plan": f.plan, "intent": filepath.Join(f.execDir(), "intent.json"),
+			"result": filepath.Join(f.execDir(), "result.json")}[c.name]
+		hits := map[string]int{}
+		var mine, held []*os.File
+		readHook = func(stage string) error {
+			hits[stage]++
+			switch stage {
+			case c.name + "-read":
+				for _, x := range mine {
+					if _, err := x.Stat(); err == nil {
+						held = append(held, x)
+					}
+				}
+				return errors.New("injected read fault")
+			case c.name + "-close":
+				return errors.New("injected distinct close fault")
+			}
+			return nil
+		}
+		before := snapshot(t, f.state)
+		d := &descriptors{}
+		opened = func(x *os.File) { d.add(x); mine = append(mine, x) }
+		passed, err := Review(context.Background(), f.req(f.head, true), &strings.Builder{})
+		opened, readHook = nil, nil
+		d.assertClosed(t, c.name)
+		if err == nil || err.Error() != c.want || passed {
+			t.Errorf("%s: %v want %s", c.name, err, c.want)
+		}
+		for _, s := range []string{"-open", "-read", "-close"} {
+			if hits[c.name+s] != 1 {
+				t.Errorf("%s: %s hit %d times", c.name, c.name+s, hits[c.name+s])
+			}
+		}
+		if len(held) != 1 || held[0].Name() != target {
+			t.Errorf("%s: %d descriptors open at the read fault", c.name, len(held))
+		}
+		for _, x := range held {
+			if _, err := x.Stat(); !errors.Is(err, os.ErrClosed) {
+				t.Errorf("%s: descriptor not closed after read and close faults", c.name)
+			}
+		}
+		if f.starts() != 0 || snapshot(t, f.state) != before {
+			t.Errorf("%s: started or state changed", c.name)
+		}
+	}
+}
+
+// Reports spelled with genuine JSON escapes. The fixture bytes contain a
+// backslash-u escape and decode to the literal member names and values; a
+// single escaped spelling is accepted, an escaped duplicate is refused, in
+// both object formats and output modes. Direct parser controls show the
+// duplicate refusal independently, including at a nested level where the
+// reviewer-run nested report is also invalid for its unknown key.
+func TestReviewEscapedReports(t *testing.T) {
+	keys := func(s string) ([]string, map[string]any) {
+		dec := json.NewDecoder(strings.NewReader(s))
+		var ks []string
+		vals := map[string]any{}
+		dec.Token()
+		for dec.More() {
+			k, _ := dec.Token()
+			var v any
+			dec.Decode(&v)
+			ks = append(ks, k.(string))
+			vals[k.(string)] = v
+		}
+		return ks, vals
+	}
+	for _, c := range []struct {
+		raw, keys, verdict string
+	}{
+		{reportDupEscaped, "schema_version,verdict,verdict", "PASS"},
+		{reportDupEscapedVersion, "schema_version,verdict,schema_version", "PASS"},
+		{reportDupNestedEscaped, "schema_version,verdict,x", "PASS"},
+		{reportEscapedKeys, "schema_version,verdict", "PASS"},
+		{reportEscapedValue, "schema_version,verdict", "REQUIRED_FIXES"},
+	} {
+		ks, vals := keys(c.raw)
+		if len(esc) != 2 || esc[0] != 0x5c || esc[1] != 'u' || !strings.Contains(c.raw, esc+"00") ||
+			strings.Join(ks, ",") != c.keys || vals["verdict"] != c.verdict {
+			t.Errorf("fixture %s decodes to %v %v", c.raw, ks, vals["verdict"])
+		}
+	}
+	if !strings.Contains(reportEscapedKeys, `"verdic`+esc+`0074"`) || strings.Contains(reportEscapedKeys, `"verdict"`) ||
+		!strings.Contains(reportEscapedValue, "REQUIRED"+esc+"005fFIXES") || strings.Contains(reportEscapedValue, "REQUIRED_FIXES") {
+		t.Error("accepted controls are not escaped spellings")
+	}
+	for _, c := range []struct {
+		data, verdict string
+		ok            bool
+	}{
+		{reportEscapedKeys, "PASS", true},
+		{reportEscapedValue, "REQUIRED_FIXES", true},
+		{`{"schema_version":1,"verdict":"P` + esc + `0041SS"}`, "PASS", true},
+		{reportDupEscaped, "", false},
+		{reportDupEscapedVersion, "", false},
+		{`{"schema_version":1,"verdic` + esc + `0074":"PASS","verdict":"REQUIRED_FIXES"}`, "", false},
+	} {
+		if v, ok := ParseReport([]byte(c.data)); ok != c.ok || v != c.verdict {
+			t.Errorf("ParseReport(%s) = %q %v", c.data, v, ok)
+		}
+	}
+	if _, ok := strictObject([]byte(`{"x":{"a":1,"` + esc + `0061":2}}`)); ok {
+		t.Error("nested escaped duplicate accepted")
+	}
+	if _, ok := strictObject([]byte(`{"x":{"a":1,"` + esc + `0062":2}}`)); !ok {
+		t.Error("nested single escaped member refused")
+	}
+	for _, format := range []string{"sha1", "sha256"} {
+		for _, c := range []struct{ mode, outcome, verdict, after string }{
+			{"escaped-keys", "review_passed", "PASS", "head"},
+			{"escaped-value", "review_required_fixes", "REQUIRED_FIXES", "head"},
+			{"dup-escaped", "reviewer_unverified", "null", "null"},
+			{"dup-escaped-version", "reviewer_unverified", "null", "null"},
+		} {
+			for _, asJSON := range []bool{true, false} {
+				f := newFx(t, format, c.mode)
+				after := c.after
+				if after == "head" {
+					after = f.head
+				}
+				out, passed, err := f.run(context.Background(), f.req(f.head, asJSON))
+				wantJ := wantResultJSON(c.outcome, "exited", "0", c.verdict, format, f.head, after)
+				want := wantJ
+				if !asJSON {
+					want = wantText(c.outcome, "exited", "0", c.verdict, format, f.head, after)
+				}
+				if err != nil || out != want || passed != (c.outcome == "review_passed") {
+					t.Errorf("%s %s json=%v: %v\n got %q\nwant %q", format, c.mode, asJSON, err, out, want)
+				}
+				if got := string(readFile(t, filepath.Join(f.attempt(), "result.json"))); got != wantJ {
+					t.Errorf("%s %s: result.json %q", format, c.mode, got)
+				}
+				if f.starts() != 1 {
+					t.Errorf("%s %s: starts %d", format, c.mode, f.starts())
+				}
+			}
 		}
 	}
 }

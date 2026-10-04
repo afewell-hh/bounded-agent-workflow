@@ -328,6 +328,15 @@ and the 76 legacy comparisons did not run on those bytes. The test line was corr
 afterwards and only focused gofmt/vet ran on it. A later repair added the missing test
 oracles described in [verification](verification.md#implemented-slice-gates-review) and
 ran the mandatory gates once on its final bytes; that run is the worker's claim only.
+A fresh independent review of that committed candidate observed all mandatory gates
+pass but reproduced two defects (cancellation at the boundary immediately before the
+exclusive ID mkdir consumed the ID and gave `review_uncertain`; a state-root safety error
+found while acquiring was reported as `review_storage_unavailable`) and missing oracles
+(JSON REQUIRED_FIXES journeys, report fixtures without genuine escapes, and no combined
+read-plus-close fault). A further repair changed only `internal/review/storage.go` among
+production files and added those tests; its focused review-package and review-journey
+runs passed and the tests failed against the previous `storage.go`. It ran the mandatory
+gates once on its final bytes; that run is likewise the worker's claim only.
 Default host gates (all three fixture variables unset), independent review, integration
 and closeout results are recorded on
 [ticket #21](https://github.com/afewell-hh/bounded-agent-workflow/issues/21), not here.

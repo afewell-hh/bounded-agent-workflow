@@ -41,6 +41,15 @@ const (
 	reportPass  = `{"schema_version":1,"verdict":"PASS"}` + "\n"
 	reportFixes = `{"schema_version":1,"verdict":"REQUIRED_FIXES"}` + "\n"
 	dummySecret = "DUMMY-SECRET-7f3a91c2-not-a-real-token"
+	// esc is the two bytes backslash and u that begin a JSON escape, spelled
+	// with a hex byte escape so the report bytes below unambiguously contain
+	// genuine escapes. TestReviewEscapedReports checks how they decode.
+	esc                     = "\x5c" + "u"
+	reportDupEscaped        = `{"schema_version":1,"verdict":"PASS","verdic` + esc + `0074":"PASS"}`
+	reportDupEscapedVersion = `{"schema_version":1,"verdict":"PASS","schem` + esc + `0061_version":1}`
+	reportDupNestedEscaped  = `{"schema_version":1,"verdict":"PASS","x":{"a":1,"` + esc + `0061":2}}`
+	reportEscapedKeys       = `{"schem` + esc + `0061_version":1,"verdic` + esc + `0074":"PASS"}`
+	reportEscapedValue      = `{"schema_version":1,"verdict":"REQUIRED` + esc + `005fFIXES"}`
 )
 
 func padReport(n int) string {
@@ -79,9 +88,16 @@ func fakeReviewer(mode, counter string, extra []string) int {
 		out(reportPass)
 		return 3
 	case "dup-escaped":
-		out(`{"schema_version":1,"verdict":"PASS","verdict":"PASS"}`)
+		out(reportDupEscaped)
+	case "dup-escaped-version":
+		out(reportDupEscapedVersion)
 	case "dup-nested-escaped":
-		out(`{"schema_version":1,"verdict":"PASS","x":{"a":1,"a":2}}`)
+		// Also invalid for its unknown "x" key alone; never sole evidence.
+		out(reportDupNestedEscaped)
+	case "escaped-keys":
+		out(reportEscapedKeys)
+	case "escaped-value":
+		out(reportEscapedValue)
 	case "escaped-control":
 		out(`{"schema_version":1,"verdict":"PA\u0001SS"}`)
 	case "raw-control":

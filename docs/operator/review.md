@@ -238,6 +238,13 @@ Receipt: recorded
 result or its delivery could not be confirmed; stdout may hold a partial
 prefix. Nothing is rolled back or removed.
 
+Before the attempt directory is created, acquiring rechecks the state root and
+`review-v1`: an unsafe path, mode or replacement found then keeps its
+`unsafe_state_path`, `state_permissions` or `state_changed` code; other storage
+failures are `review_storage_unavailable` and a failed sync
+`durability_unavailable`. An interrupt seen up to the exclusive directory
+creation is `review_cancelled` with no attempt directory.
+
 ## Explanation and limits
 
 **Trust model.** The reviewer, repository, plan and state are trusted

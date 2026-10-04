@@ -118,11 +118,38 @@ func openChecked(path, stage string) (*os.File, error) {
 	if err == nil {
 		err = at(stage + "-recheck")
 	}
-	if err != nil || !fi.IsDir() || !private(fi, 0o700) || !os.SameFile(fi, lfi) {
+	if err != nil {
 		f.Close()
-		return nil, fail(CodeStateChanged)
+		return nil, fail(CodeStateUnavailable)
+	}
+	if err := openedDirSafety(fi, lfi); err != nil {
+		f.Close()
+		return nil, err
 	}
 	return f, nil
+}
+
+// openedDirSafety checks an opened directory's type, owner and mode before
+// its identity against the earlier Lstat.
+func openedDirSafety(fi, lfi fs.FileInfo) error {
+	switch {
+	case !fi.IsDir():
+		return fail(CodeUnsafeStatePath)
+	case !private(fi, 0o700):
+		return fail(CodeStatePermissions)
+	case !os.SameFile(fi, lfi):
+		return fail(CodeStateChanged)
+	}
+	return nil
+}
+
+// preID maps a failure before the exclusive ID mkdir: an identified state
+// safety error is retained; any other failure is review_storage_unavailable.
+func preID(err error) error {
+	if IsCode(err, CodeUnsafeStatePath) || IsCode(err, CodeStatePermissions) || IsCode(err, CodeStateChanged) {
+		return err
+	}
+	return fail(CodeStorageUnavailable)
 }
 
 // syncClose checks the directory holds exactly want, Syncs and closes it.
@@ -170,9 +197,9 @@ func mkdirOwn(path, stage string) error {
 
 // acquire creates the namespace if needed and the exclusive attempt
 // directory with reviewer/home and reviewer/tmp, all synced and closed.
-// Failures and cancellation before the exclusive ID mkdir are storage,
-// durability or cancellation codes; afterwards every failure is
-// review_uncertain. owned reports that this call created the ID directory.
+// Failures and cancellation before the exclusive ID mkdir are retained state
+// safety, storage, durability or cancellation codes; afterwards every
+// failure is review_uncertain. owned reports that this call created the ID directory.
 func acquire(root, ns, attempt string, cancelled func() bool) (owned bool, err error) {
 	if err := at("ns-mkdir"); err != nil {
 		return false, fail(CodeStorageUnavailable)
@@ -188,7 +215,7 @@ func acquire(root, ns, attempt string, cancelled func() bool) (owned bool, err e
 		return false, err
 	}
 	if _, err := checkPrivateDir(ns); err != nil {
-		return false, fail(CodeStorageUnavailable)
+		return false, preID(err)
 	}
 	if cancelled() {
 		return false, fail(CodeCancelled)
@@ -196,7 +223,10 @@ func acquire(root, ns, attempt string, cancelled func() bool) (owned bool, err e
 	// The root is synced even when the namespace already existed. Its open
 	// descriptor is rechecked for type, owner, mode and identity first.
 	rlfi, err := checkPrivateDir(root)
-	if err != nil || at("root-lstat") != nil {
+	if err != nil {
+		return false, preID(err)
+	}
+	if at("root-lstat") != nil {
 		return false, fail(CodeStorageUnavailable)
 	}
 	rootDir, err := openDir(root)
@@ -210,9 +240,13 @@ func acquire(root, ns, attempt string, cancelled func() bool) (owned bool, err e
 	if err == nil {
 		err = at("root-recheck")
 	}
-	if err != nil || !rfi.IsDir() || !private(rfi, 0o700) || !os.SameFile(rfi, rlfi) {
+	if err != nil {
 		rootDir.Close()
 		return false, fail(CodeStorageUnavailable)
+	}
+	if err := openedDirSafety(rfi, rlfi); err != nil {
+		rootDir.Close()
+		return false, err
 	}
 	serr := at("root-sync")
 	if serr == nil {
@@ -233,7 +267,7 @@ func acquire(root, ns, attempt string, cancelled func() bool) (owned bool, err e
 	}
 	nsDir, err := openChecked(ns, "ns")
 	if err != nil {
-		return false, fail(CodeStorageUnavailable)
+		return false, preID(err)
 	}
 	if cancelled() {
 		nsDir.Close()
@@ -244,6 +278,10 @@ func acquire(root, ns, attempt string, cancelled func() bool) (owned bool, err e
 	if err := at("id-mkdir"); err != nil {
 		nsDir.Close()
 		return false, fail(CodeStorageUnavailable)
+	}
+	if cancelled() {
+		nsDir.Close()
+		return false, fail(CodeCancelled)
 	}
 	if err := os.Mkdir(attempt, 0o700); err != nil {
 		nsDir.Close()

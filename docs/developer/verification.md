@@ -252,7 +252,10 @@ SHA-256 it follows the [operator example](../operator/review.md#how-to-run-a-dis
 run create, fake worker/verifier execute, then review of a candidate equal to `after_head`
 (JSON PASS, exit 0, `result.json` equal to stdout) and of a later committed descendant (text
 PASS), writing both packets' HEAD fields to the journey summary as the D1 comparison; text
-REQUIRED_FIXES (exit 1, `review_failed`), replay (`review_exists`, no start), a dirty candidate
+and JSON REQUIRED_FIXES (exit 1, `review_failed`; stdout and the raw saved `result.json`
+compared with hand-written packets whose timestamps come from the saved intent and result
+and must lie inside the wall-clock window observed around the command), replay
+(`review_exists`, no start), a dirty candidate
 (no start), nonzero exit overriding stdout PASS, reviewer prose and stderr carrying a dummy
 secret that never appears in output, and a refused stdout giving `review_uncertain` with the
 result retained. Expected packets are hand-written; starts are counted by the fakes.
@@ -263,15 +266,24 @@ result retained. Expected packets are hand-written; starts are counted by the fa
   mismatch, wrong width, diverged, missing, unborn winning over width, and unstaged,
   staged, untracked and conflicted entries refused with zero starts and an unchanged state
   tree, atime excluded). Reviewer rows through real processes: nonzero over PASS, escaped
-  duplicate names at top level and nested, one escaped control character, raw control,
+  duplicate names at top level and nested (the nested report is also invalid for its
+  unknown key alone, so it is not the evidence for duplicate refusal), one escaped control
+  character, raw control,
   invalid UTF-8, version/number forms, unknown keys, prose, 2,048 versus 2,049 stdout bytes,
   stderr over 65,536 bytes, and tracked/untracked/staged/committed changes giving
-  `candidate_changed`. Each false usability fact through the review-local runner seam (nil
-  in production) and the exact reviewer spec. Plan parser boundaries (65,536/65,537 bytes,
+  `candidate_changed`. Escaped reports (`TestReviewEscapedReports`): the fixture bytes are
+  checked to contain backslash-u escapes and to decode to the literal names and values;
+  single escaped keys and an escaped verdict value are accepted, and escaped duplicates
+  refused, through real reviewers in both formats and outputs, with direct `ParseReport`
+  and nested strict-decoder controls. Each false usability fact through the review-local
+  runner seam (nil in production) and the exact reviewer spec. Plan parser boundaries (65,536/65,537 bytes,
   arguments, timeouts, duplicates). Plan and receipt safety: symlink, FIFO, directory,
   modes, a socket and setgid plan (the supplied read-only fixtures when their variables are
   set, otherwise created here and observed), replacement between `Lstat` and open with the
-  original inode retained (safety before identity), read/parser-before-close precedence, and
+  original inode retained (safety before identity), read/parser-before-close precedence
+  (including a read fault and a distinct close fault on the same plan, intent or result:
+  the read error code is returned, each seam is hit once and the descriptor held at the
+  read fault is closed; under C2 both faults map to the same code), and
   every opened `*os.File` reporting `os.ErrClosed`. Receipt own-ID, different-ID, reversed
   interval with mismatching linkage, linkage, eligibility and byte boundaries; validation
   order; a stage fault table for every namespace, root, ID, scratch, intent, result and
@@ -280,7 +292,13 @@ result retained. Expected packets are hand-written; starts are counted by the fa
   `intent.json`, `result.json` and their staging files are retained, every descriptor
   that was open at the injected stage (and every other opened `*os.File`) reporting
   `os.ErrClosed` afterwards, and refused replay leaving the state tree unchanged;
-  cancellation before acquisition, before and after the ID, after intent, during the real
+  real state-root and namespace changes at the acquisition rechecks before the ID (mode
+  0755, symlink, removal, replacement, and a replaced 0755 root showing safety before
+  identity) returning `state_permissions`, `unsafe_state_path` or `state_changed`, each
+  confirmed afterwards by `Lstat`, with no owned ID, zero starts and closed descriptors;
+  cancellation before acquisition, before and after the ID (including at the final
+  boundary immediately before the exclusive ID mkdir: `review_cancelled`, no ID, an empty
+  retained namespace and its held descriptor closed), after intent, during the real
   reviewer (after its nonce marker) and late; concurrent same-ID calls starting one
   reviewer; and, for both formats, a controller child killed with SIGKILL before and after
   reviewer start, joined through its own handle, leaving intent and staging without a

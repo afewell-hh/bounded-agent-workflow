@@ -215,23 +215,55 @@ func TestReviewBinaryJourneys(t *testing.T) {
 			t.Fatal(err)
 		}
 		// One run record and execute attempt per scenario, as an operator would.
-		prepare := func(n int, worker string) (id, after string) {
-			id = strings.Repeat(strconv.Itoa(n), 32)
+		prepareID := func(id, label, worker string) string {
 			cur, err := tf.OID(home, repo, "HEAD")
 			if err != nil {
 				t.Fatal(err)
 			}
-			run(format+" create "+itoa(n), 0, nil, "run", "create", "--state-dir", state, "--run-id", id, "--repo", repo,
+			run(format+" create "+label, 0, nil, "run", "create", "--state-dir", state, "--run-id", id, "--repo", repo,
 				"--ticket", ticket, "--scope-sha256", scope, "--policy-commit", cur, "--json")
-			ep := filepath.Join(fd, "execute-plan-"+itoa(n)+".json")
+			ep := filepath.Join(fd, "execute-plan-"+label+".json")
 			writePlan(ep, `{"schema_version":1,"worker":`+cmdJSON(worker, counter)+`,"verification":`+cmdJSON("verifier-ok", counter)+`}`)
-			out, _ := run(format+" execute "+itoa(n), 0, nil, "run", "execute", "--repo", repo, "--state-dir", state,
+			out, _ := run(format+" execute "+label, 0, nil, "run", "execute", "--repo", repo, "--state-dir", state,
 				"--run-id", id, "--plan", ep, "--json")
 			p := decode(out)
 			if p.Outcome != "verification_passed" || p.Repository.AfterHead == nil {
-				t.Fatalf("execute %d: %s", n, out)
+				t.Fatalf("execute %s: %s", label, out)
 			}
-			return id, *p.Repository.AfterHead
+			return *p.Repository.AfterHead
+		}
+		prepare := func(n int, worker string) (id, after string) {
+			id = strings.Repeat(strconv.Itoa(n), 32)
+			return id, prepareID(id, itoa(n), worker)
+		}
+		// savedTimes reads created_at from the separately saved review intent
+		// and completed_at from the saved result, and requires both inside the
+		// wall-clock window the test observed around the command, so the
+		// hand-written packets do not take their timestamps on trust.
+		savedTimes := func(id string, lo, hi time.Time) (string, string) {
+			var in, res struct {
+				CreatedAt   string `json:"created_at"`
+				CompletedAt string `json:"completed_at"`
+			}
+			ib, err1 := os.ReadFile(filepath.Join(state, "review-v1", id, "intent.json"))
+			rb, err2 := os.ReadFile(filepath.Join(state, "review-v1", id, "result.json"))
+			if err1 != nil || err2 != nil || json.Unmarshal(ib, &in) != nil || json.Unmarshal(rb, &res) != nil {
+				t.Fatalf("saved review %s unreadable", id)
+			}
+			c, err1 := time.Parse(time.RFC3339, in.CreatedAt)
+			d, err2 := time.Parse(time.RFC3339, res.CompletedAt)
+			if err1 != nil || err2 != nil || c.Before(lo.Truncate(time.Second)) || d.Before(c) || d.After(hi) ||
+				!journeyTimeRE.MatchString(in.CreatedAt) || !journeyTimeRE.MatchString(res.CompletedAt) {
+				t.Fatalf("saved times %q %q outside [%v, %v]", in.CreatedAt, res.CompletedAt, lo, hi)
+			}
+			return in.CreatedAt, res.CompletedAt
+		}
+		savedResult := func(id string) string {
+			b, err := os.ReadFile(filepath.Join(state, "review-v1", id, "result.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return string(b)
 		}
 		reviewPlan := func(mode string) string {
 			p := filepath.Join(fd, "review-plan-"+mode+".json")
@@ -269,9 +301,31 @@ func TestReviewBinaryJourneys(t *testing.T) {
 
 		// 2. Text REQUIRED_FIXES, exit 1 with review_failed.
 		id2, _ := prepare(2, "worker-noop")
+		lo := time.Now().UTC()
 		out, errb = review("review fixes text", 1, id2, head, reviewPlan("reviewer-fixes"), false, nil)
+		hi := time.Now().UTC()
 		if out != wantText(id2, "review_required_fixes", "exited", "0", "REQUIRED_FIXES", format, head, head) || errb != "baw: review_failed\n" {
 			t.Errorf("%s fixes text: %q %q", format, out, errb)
+		}
+		c, d := savedTimes(id2, lo, hi)
+		if got := savedResult(id2); got != wantJSON(id2, "review_required_fixes", "exited", "0", "REQUIRED_FIXES", format, head, head, c, d) {
+			t.Errorf("%s fixes text: saved result %q", format, got)
+		}
+
+		// 2b. JSON REQUIRED_FIXES, exit 1 with review_failed; stdout and the
+		// raw saved result are both the hand-written packet.
+		idFixesJSON := strings.Repeat("a", 32)
+		prepareID(idFixesJSON, "fixes-json", "worker-noop")
+		lo = time.Now().UTC()
+		out, errb = review("review fixes json", 1, idFixesJSON, head, reviewPlan("reviewer-fixes"), true, nil)
+		hi = time.Now().UTC()
+		c, d = savedTimes(idFixesJSON, lo, hi)
+		wantFixes := wantJSON(idFixesJSON, "review_required_fixes", "exited", "0", "REQUIRED_FIXES", format, head, head, c, d)
+		if out != wantFixes || errb != "baw: review_failed\n" {
+			t.Errorf("%s fixes json: %q %q", format, out, errb)
+		}
+		if got := savedResult(idFixesJSON); got != wantFixes {
+			t.Errorf("%s fixes json: saved result %q", format, got)
 		}
 
 		// 3. Later committed descendant: different IDs, verification not inherited.
@@ -334,8 +388,9 @@ func TestReviewBinaryJourneys(t *testing.T) {
 		if b, err := os.ReadFile(filepath.Join(state, "review-v1", id7, "result.json")); err != nil || !strings.Contains(string(b), `"review_passed"`) {
 			t.Errorf("%s uncertain: result not retained", format)
 		}
-		if starts(counter, "reviewer") != 7 {
-			t.Errorf("%s: reviewer starts %d want 7", format, starts(counter, "reviewer"))
+		// Seven started reviews plus the JSON REQUIRED_FIXES scenario (2b).
+		if starts(counter, "reviewer") != 8 {
+			t.Errorf("%s: reviewer starts %d want 8", format, starts(counter, "reviewer"))
 		}
 
 		// 5. SIGINT (JSON) and SIGTERM (text) sent to the built binary only
@@ -422,8 +477,8 @@ func TestReviewBinaryJourneys(t *testing.T) {
 				t.Errorf("%s %s: HEAD moved", format, sg.name)
 			}
 		}
-		if starts(counter, "reviewer") != 9 {
-			t.Errorf("%s: reviewer starts %d want 9", format, starts(counter, "reviewer"))
+		if starts(counter, "reviewer") != 10 {
+			t.Errorf("%s: reviewer starts %d want 10", format, starts(counter, "reviewer"))
 		}
 	}
 }
