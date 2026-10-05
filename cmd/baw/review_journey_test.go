@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -92,6 +93,101 @@ func journeyMarker(counter, name string) {
 
 var journeyTimeRE = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$`)
 
+// journeyLayout is the accepted canonical UTC form, written here by hand
+// rather than taken from the implementation.
+const journeyLayout = "2006-01-02T15:04:05Z"
+
+// journeyTime accepts only a real calendar time whose canonical rendering is
+// exactly s, so impossible dates and alternative spellings are rejected.
+func journeyTime(s string) (time.Time, error) {
+	t, err := time.Parse(journeyLayout, s)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if !journeyTimeRE.MatchString(s) || t.Format(journeyLayout) != s {
+		return time.Time{}, fmt.Errorf("non-canonical timestamp %q", s)
+	}
+	return t, nil
+}
+
+// checkJourneyTimes is the saved-review timestamp oracle: the result's
+// created_at equals the separately saved intent's, completion does not
+// precede creation, and both lie in the window [lo, hi] the test observed
+// around the invocation. Canonical times drop fractional seconds, so the
+// lower bound is lo truncated to its whole second.
+func checkJourneyTimes(intentCreated, resultCreated, resultCompleted string, lo, hi time.Time) error {
+	c, err := journeyTime(intentCreated)
+	if err != nil {
+		return fmt.Errorf("intent created_at: %v", err)
+	}
+	if _, err := journeyTime(resultCreated); err != nil {
+		return fmt.Errorf("result created_at: %v", err)
+	}
+	d, err := journeyTime(resultCompleted)
+	if err != nil {
+		return fmt.Errorf("result completed_at: %v", err)
+	}
+	if resultCreated != intentCreated {
+		return fmt.Errorf("result created_at %q differs from intent %q", resultCreated, intentCreated)
+	}
+	if d.Before(c) {
+		return fmt.Errorf("completed_at %q precedes created_at %q", resultCompleted, intentCreated)
+	}
+	if c.Before(lo.Truncate(time.Second)) || d.After(hi) {
+		return fmt.Errorf("times %q %q outside [%v, %v]", intentCreated, resultCompleted, lo, hi)
+	}
+	return nil
+}
+
+// TestReviewJourneyTimeOracle shows the oracle used by the binary journeys
+// rejects impossible, non-canonical, stale, late, reversed and mismatched
+// timestamps while accepting the boundary cases of a real window.
+func TestReviewJourneyTimeOracle(t *testing.T) {
+	lo := time.Date(2026, 10, 4, 12, 0, 0, 400_000_000, time.UTC)
+	hi := time.Date(2026, 10, 4, 12, 0, 3, 700_000_000, time.UTC)
+	const in, done = "2026-10-04T12:00:00Z", "2026-10-04T12:00:03Z"
+	for _, c := range []struct{ intent, created, completed string }{
+		{in, in, done},
+		{in, in, in},
+		{"2026-10-04T12:00:02Z", "2026-10-04T12:00:02Z", "2026-10-04T12:00:02Z"},
+	} {
+		if err := checkJourneyTimes(c.intent, c.created, c.completed, lo, hi); err != nil {
+			t.Errorf("valid %v rejected: %v", c, err)
+		}
+	}
+	bad := []string{
+		"2026-02-30T12:00:01Z", "2026-13-04T12:00:01Z", "2026-10-04T24:00:01Z", "2026-10-04T12:60:01Z",
+		"2026-10-04T12:00:60Z", "2026-10-04T12:00:01.5Z", "2026-10-04T12:00:01+00:00", "2026-10-04 12:00:01Z",
+		"2026-10-04T12:00:01z", "2026-10-04T12:00:01", " 2026-10-04T12:00:01Z", "",
+	}
+	for _, s := range bad {
+		for i, c := range [][3]string{{s, s, done}, {in, s, done}, {in, in, s}} {
+			if checkJourneyTimes(c[0], c[1], c[2], lo, hi) == nil {
+				t.Errorf("malformed %q in position %d accepted", s, i)
+			}
+		}
+	}
+	for name, c := range map[string][3]string{
+		"stale creation":     {"2026-10-04T11:59:59Z", "2026-10-04T11:59:59Z", done},
+		"late completion":    {in, in, "2026-10-04T12:00:04Z"},
+		"both before window": {"2025-10-04T12:00:00Z", "2025-10-04T12:00:00Z", "2025-10-04T12:00:01Z"},
+		"both after window":  {"2027-10-04T12:00:00Z", "2027-10-04T12:00:00Z", "2027-10-04T12:00:01Z"},
+		"reversed interval":  {"2026-10-04T12:00:02Z", "2026-10-04T12:00:02Z", "2026-10-04T12:00:01Z"},
+		"result differs":     {in, "2026-10-04T12:00:01Z", done},
+		"intent differs":     {"2026-10-04T12:00:01Z", in, done},
+	} {
+		if checkJourneyTimes(c[0], c[1], c[2], lo, hi) == nil {
+			t.Errorf("%s %v accepted", name, c)
+		}
+	}
+	if _, err := journeyTime("2028-02-29T00:00:00Z"); err != nil {
+		t.Errorf("leap day rejected: %v", err)
+	}
+	if _, err := journeyTime("2027-02-29T00:00:00Z"); err == nil {
+		t.Error("non-leap February 29 accepted")
+	}
+}
+
 func TestReviewBinaryJourneys(t *testing.T) {
 	if *bawBinary == "" || *journeyDir == "" {
 		t.Skip("binary journeys need -baw-binary and -journey-dir")
@@ -172,7 +268,9 @@ func TestReviewBinaryJourneys(t *testing.T) {
 		if err := json.Unmarshal([]byte(s), &p); err != nil {
 			t.Fatalf("decode %q: %v", s, err)
 		}
-		if !journeyTimeRE.MatchString(p.CreatedAt) || !journeyTimeRE.MatchString(p.Completed) || p.Completed < p.CreatedAt {
+		c, err1 := journeyTime(p.CreatedAt)
+		d, err2 := journeyTime(p.Completed)
+		if err1 != nil || err2 != nil || d.Before(c) {
 			t.Fatalf("timestamps %q %q", p.CreatedAt, p.Completed)
 		}
 		return p
@@ -237,9 +335,10 @@ func TestReviewBinaryJourneys(t *testing.T) {
 			return id, prepareID(id, itoa(n), worker)
 		}
 		// savedTimes reads created_at from the separately saved review intent
-		// and completed_at from the saved result, and requires both inside the
-		// wall-clock window the test observed around the command, so the
-		// hand-written packets do not take their timestamps on trust.
+		// and created_at/completed_at from the saved result, and checks them
+		// with checkJourneyTimes against the wall-clock window the test
+		// observed around the command, so the hand-written packets do not
+		// take their timestamps on trust.
 		savedTimes := func(id string, lo, hi time.Time) (string, string) {
 			var in, res struct {
 				CreatedAt   string `json:"created_at"`
@@ -250,11 +349,8 @@ func TestReviewBinaryJourneys(t *testing.T) {
 			if err1 != nil || err2 != nil || json.Unmarshal(ib, &in) != nil || json.Unmarshal(rb, &res) != nil {
 				t.Fatalf("saved review %s unreadable", id)
 			}
-			c, err1 := time.Parse(time.RFC3339, in.CreatedAt)
-			d, err2 := time.Parse(time.RFC3339, res.CompletedAt)
-			if err1 != nil || err2 != nil || c.Before(lo.Truncate(time.Second)) || d.Before(c) || d.After(hi) ||
-				!journeyTimeRE.MatchString(in.CreatedAt) || !journeyTimeRE.MatchString(res.CompletedAt) {
-				t.Fatalf("saved times %q %q outside [%v, %v]", in.CreatedAt, res.CompletedAt, lo, hi)
+			if err := checkJourneyTimes(in.CreatedAt, res.CreatedAt, res.CompletedAt, lo, hi); err != nil {
+				t.Fatalf("saved review %s: %v", id, err)
 			}
 			return in.CreatedAt, res.CompletedAt
 		}
@@ -278,20 +374,26 @@ func TestReviewBinaryJourneys(t *testing.T) {
 			return run(format+" "+name, code, stdout, args...)
 		}
 
-		// 1. Matching candidate, JSON PASS: D1 same-ID comparison.
+		// 1. Matching candidate, JSON PASS: D1 same-ID comparison. Stdout and
+		// the raw saved result are both the hand-written packet, with times
+		// from the saved intent/result checked against the invocation window.
 		id1, after1 := prepare(1, "worker-noop")
+		lo := time.Now().UTC()
 		out, errb := review("review pass json", 0, id1, head, reviewPlan("reviewer-pass"), true, nil)
-		p := decode(out)
-		if out != wantJSON(id1, "review_passed", "exited", "0", "PASS", format, head, head, p.CreatedAt, p.Completed) || errb != "" {
+		hi := time.Now().UTC()
+		c, d := savedTimes(id1, lo, hi)
+		wantPass := wantJSON(id1, "review_passed", "exited", "0", "PASS", format, head, head, c, d)
+		if out != wantPass || errb != "" {
 			t.Errorf("%s pass json: %q %q", format, out, errb)
 		}
+		if got := savedResult(id1); got != wantPass {
+			t.Errorf("%s pass json: saved result %q", format, got)
+		}
+		p := decode(out)
 		if p.Repository.BeforeHead != after1 {
 			t.Errorf("%s: D1 same-ID comparison failed", format)
 		}
 		summary.WriteString("D1 " + format + ": review.before_head=" + p.Repository.BeforeHead + " execute.after_head=" + after1 + " -> same ID\n")
-		if b, _ := os.ReadFile(filepath.Join(state, "review-v1", id1, "result.json")); string(b) != out {
-			t.Errorf("%s: result.json differs from --json output", format)
-		}
 		// Replay of the same ID never starts another reviewer.
 		n := starts(counter, "reviewer")
 		out, errb = review("replay", 1, id1, head, reviewPlan("reviewer-pass"), true, nil)
@@ -301,13 +403,13 @@ func TestReviewBinaryJourneys(t *testing.T) {
 
 		// 2. Text REQUIRED_FIXES, exit 1 with review_failed.
 		id2, _ := prepare(2, "worker-noop")
-		lo := time.Now().UTC()
+		lo = time.Now().UTC()
 		out, errb = review("review fixes text", 1, id2, head, reviewPlan("reviewer-fixes"), false, nil)
-		hi := time.Now().UTC()
+		hi = time.Now().UTC()
 		if out != wantText(id2, "review_required_fixes", "exited", "0", "REQUIRED_FIXES", format, head, head) || errb != "baw: review_failed\n" {
 			t.Errorf("%s fixes text: %q %q", format, out, errb)
 		}
-		c, d := savedTimes(id2, lo, hi)
+		c, d = savedTimes(id2, lo, hi)
 		if got := savedResult(id2); got != wantJSON(id2, "review_required_fixes", "exited", "0", "REQUIRED_FIXES", format, head, head, c, d) {
 			t.Errorf("%s fixes text: saved result %q", format, got)
 		}
@@ -340,9 +442,15 @@ func TestReviewBinaryJourneys(t *testing.T) {
 		if err != nil || desc == after3 {
 			t.Fatalf("descendant %v", err)
 		}
+		lo = time.Now().UTC()
 		out, errb = review("review descendant text", 0, id3, desc, reviewPlan("reviewer-pass"), false, nil)
+		hi = time.Now().UTC()
 		if out != wantText(id3, "review_passed", "exited", "0", "PASS", format, desc, desc) || errb != "" {
 			t.Errorf("%s descendant: %q %q", format, out, errb)
+		}
+		c, d = savedTimes(id3, lo, hi)
+		if got := savedResult(id3); got != wantJSON(id3, "review_passed", "exited", "0", "PASS", format, desc, desc, c, d) {
+			t.Errorf("%s descendant: saved result %q", format, got)
 		}
 		summary.WriteString("D1 " + format + ": review.before_head=" + desc + " execute.after_head=" + after3 +
 			" -> different IDs; execute verification does not cover the candidate\n")
