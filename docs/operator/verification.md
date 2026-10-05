@@ -224,7 +224,10 @@ publication is `verification_uncertain` and may leave a prefix.
 ## Explanation and limits
 
 Ctrl-C or SIGTERM before the ID is owned cancels with nothing created. After
-the intent is durable it yields a recorded `verification_unverified`; once
+the ID is owned and until the intent's directory Sync completes, it is
+`verification_uncertain` with empty stdout, no verifier start and the ID and
+any partial files kept. After the intent is durable it yields a recorded
+`verification_unverified`; once
 classified, the outcome is kept. A second Ctrl-C is absorbed while
 publication or inspection finishes. SIGKILL can leave an intent without a
 result, or partial staging files; that ID is not retried, replayed or cleaned

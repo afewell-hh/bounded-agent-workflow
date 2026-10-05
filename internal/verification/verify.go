@@ -194,7 +194,7 @@ func Verify(ctx context.Context, req Request, stdout io.Writer) (passed bool, er
 	if err != nil || !ValidIntent(data, req.RunID) || cancelled() {
 		return false, fail(CodeUncertain)
 	}
-	if err := publish(attempt, "intent", data); err != nil {
+	if err := publish(attempt, "intent", data, cancelled); err != nil {
 		return false, fail(CodeUncertain)
 	}
 
@@ -222,7 +222,8 @@ func Verify(ctx context.Context, req Request, stdout io.Writer) (passed bool, er
 	if !outputFits(data, out) || at("output-limit") != nil {
 		return false, fail(CodeUncertain)
 	}
-	if err := publish(attempt, "result", data); err != nil {
+	// The outcome is classified: late cancellation does not fail publication.
+	if err := publish(attempt, "result", data, nil); err != nil {
 		return false, fail(CodeUncertain)
 	}
 	if err := at("deliver"); err != nil {

@@ -74,9 +74,10 @@ func private(fi fs.FileInfo, perm fs.FileMode) bool {
 // mode are checked before its identity; the first applicable failure wins.
 // The descriptor is always closed, and a close failure is reported only when
 // every earlier step (safety, read, size and parse) succeeded. missing is the
-// code for an initially absent file; unavailable for other I/O and close
-// failures; tooLarge for more than limit bytes.
-func safeRead(path, name string, limit int, missing, unavailable, tooLarge Code, parse func([]byte) error) ([]byte, error) {
+// code for an initially absent file; unavailable for other I/O failures;
+// closeFailed for a close-only failure; tooLarge for more than limit bytes.
+// A parse error is returned unchanged.
+func safeRead(path, name string, limit int, missing, unavailable, closeFailed, tooLarge Code, parse func([]byte) error) ([]byte, error) {
 	phys, err := physical(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -117,7 +118,7 @@ func safeRead(path, name string, limit int, missing, unavailable, tooLarge Code,
 		return nil, perr
 	}
 	if cerr != nil {
-		return nil, fail(unavailable)
+		return nil, fail(closeFailed)
 	}
 	return data, nil
 }
@@ -166,8 +167,8 @@ func ParsePlan(data []byte) (Command, error) {
 // ReadPlan safely reads and parses the verification plan.
 func ReadPlan(path string) ([]byte, Command, error) {
 	var c Command
-	data, err := safeRead(path, "plan", MaxPlanBytes, CodePlanUnavailable, CodePlanUnavailable, CodeInvalidPlan,
-		func(b []byte) error {
+	data, err := safeRead(path, "plan", MaxPlanBytes, CodePlanUnavailable, CodePlanUnavailable, CodePlanUnavailable,
+		CodeInvalidPlan, func(b []byte) error {
 			var err error
 			c, err = ParsePlan(b)
 			return err

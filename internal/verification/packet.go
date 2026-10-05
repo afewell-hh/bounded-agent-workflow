@@ -191,7 +191,8 @@ func strictValue(dec *json.Decoder) (any, error) {
 	}
 }
 
-// ValidIntent strictly re-reads serialized verification intent bytes.
+// ValidIntent strictly re-reads serialized verification intent bytes. The
+// run_id must equal id, which must itself be a valid run ID.
 func ValidIntent(data []byte, id string) bool {
 	m, ok := strictObject(data)
 	if !ok || !exactKeys(m, "schema_version", "run_id", "record_state", "ticket_url", "scope_sha256",
@@ -201,7 +202,7 @@ func ValidIntent(data []byte, id string) bool {
 	}
 	format, _ := m["repository_object_format"].(string)
 	head := func(s string) bool { return oidFor(format, s) }
-	return isOne(m["schema_version"]) && m["run_id"] == id && m["record_state"] == recordStateIntent &&
+	return isOne(m["schema_version"]) && runIDRE.MatchString(id) && m["run_id"] == id && m["record_state"] == recordStateIntent &&
 		str(m["ticket_url"], state.ValidTicketURL) && str(m["scope_sha256"], hex64RE.MatchString) &&
 		str(m["policy_commit"], func(s string) bool { return oidFor("sha1", s) || oidFor("sha256", s) }) &&
 		str(m["repository_head"], head) && str(m["candidate_head"], head) &&
@@ -210,14 +211,15 @@ func ValidIntent(data []byte, id string) bool {
 }
 
 // ValidResult strictly re-reads serialized result bytes: exact key sets,
-// types, enums and the outcome/verification/after_head combinations.
+// types, enums and the outcome/verification/after_head combinations. The
+// run_id must equal id, which must itself be a valid run ID.
 func ValidResult(data []byte, id string) bool {
 	m, ok := strictObject(data)
 	if !ok || !exactKeys(m, "schema_version", "run_id", "operation", "authority", "readiness", "outcome",
 		"verification", "repository", "receipt_state", "created_at", "completed_at") {
 		return false
 	}
-	if !isOne(m["schema_version"]) || m["run_id"] != id || m["operation"] != operationVerify ||
+	if !isOne(m["schema_version"]) || !runIDRE.MatchString(id) || m["run_id"] != id || m["operation"] != operationVerify ||
 		m["authority"] != notEvaluated || m["readiness"] != notEvaluated || m["receipt_state"] != receiptStateRecorded ||
 		!str(m["created_at"], state.ValidTimestamp) || !str(m["completed_at"], state.ValidTimestamp) ||
 		!notBefore(m["completed_at"].(string), m["created_at"].(string)) {

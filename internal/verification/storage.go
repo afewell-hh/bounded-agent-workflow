@@ -353,16 +353,33 @@ func scratch(dir string) error {
 // publish exclusively writes data as name in the attempt directory: retained
 // staging file, Sync, close, hard link without replacement, directory Sync
 // and close. Any failure is returned; the caller reports uncertainty.
-func publish(attempt, name string, data []byte) error {
+// cancelled, when non-nil, is checked at every boundary before the directory
+// Sync has completed, so cancellation before the record is durable is a
+// failure; the directory close and its later boundary are after durability.
+// An already observed error wins over cancellation and every descriptor is
+// closed. The result is published with nil: its outcome is already classified.
+func publish(attempt, name string, data []byte, cancelled func() bool) error {
+	halted := func() error {
+		if cancelled != nil && cancelled() {
+			return fail(CodeCancelled)
+		}
+		return nil
+	}
+	step := func(stage string) error {
+		if err := at(stage); err != nil {
+			return err
+		}
+		return halted()
+	}
 	var rnd [16]byte
-	if err := at(name + "-random"); err != nil {
+	if err := step(name + "-random"); err != nil {
 		return err
 	}
 	if _, err := rand.Read(rnd[:]); err != nil {
 		return err
 	}
 	staging := filepath.Join(attempt, ".pending-"+name+"-"+hex.EncodeToString(rnd[:]))
-	if err := at(name + "-create"); err != nil {
+	if err := step(name + "-create"); err != nil {
 		return err
 	}
 	f, err := os.OpenFile(staging, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600)
@@ -370,12 +387,12 @@ func publish(attempt, name string, data []byte) error {
 		return err
 	}
 	observe(f)
-	werr := at(name + "-chmod")
+	werr := step(name + "-chmod")
 	if werr == nil {
 		werr = f.Chmod(0o600)
 	}
 	if werr == nil {
-		werr = at(name + "-write")
+		werr = step(name + "-write")
 	}
 	if werr == nil {
 		var n int
@@ -385,10 +402,13 @@ func publish(attempt, name string, data []byte) error {
 		}
 	}
 	if werr == nil {
-		werr = at(name + "-sync")
+		werr = step(name + "-sync")
 	}
 	if werr == nil {
 		werr = f.Sync()
+	}
+	if werr == nil {
+		werr = halted()
 	}
 	cerr := f.Close()
 	if cerr == nil {
@@ -400,19 +420,31 @@ func publish(attempt, name string, data []byte) error {
 	if cerr != nil {
 		return cerr
 	}
-	if err := at(name + "-link"); err != nil {
+	if err := halted(); err != nil {
+		return err
+	}
+	if err := step(name + "-link"); err != nil {
 		return err
 	}
 	if err := os.Link(staging, filepath.Join(attempt, name+".json")); err != nil {
+		return err
+	}
+	if err := halted(); err != nil {
 		return err
 	}
 	d, err := openChecked(attempt, name+"-dir")
 	if err != nil {
 		return err
 	}
-	serr := at(name + "-dir-sync")
+	serr := halted()
+	if serr == nil {
+		serr = step(name + "-dir-sync")
+	}
 	if serr == nil {
 		serr = d.Sync()
+	}
+	if serr == nil {
+		serr = halted()
 	}
 	cerr = d.Close()
 	if cerr == nil {
