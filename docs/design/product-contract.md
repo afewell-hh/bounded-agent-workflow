@@ -104,8 +104,11 @@ actual records rather than treating the newest summary as truth.
 Implemented so far: only an immutable local [run record](../operator/run-records.md) of
 supplied ticket/scope/policy references and one observed HEAD, and the recorded
 [`baw run execute`](../operator/execution.md) and [`baw run review`](../operator/review.md)
-attempts of trusted local programs; a recorded review verdict is not approval, findings or
-verification of the reviewed candidate. Approval provenance,
+attempts of trusted local programs, and the standalone
+[`baw run verify`](../operator/verification.md) observation of one trusted verifier program on a
+clean committed candidate; a recorded review verdict is not approval, findings or
+verification of the reviewed candidate, and a recorded verification is not complete gate
+evidence, a source freeze or approval. Approval provenance,
 generations, sessions, processes, budgets, receipts and recovery remain future work.
 
 The controller can execute in a separate terminal from the lead, so replacing the lead

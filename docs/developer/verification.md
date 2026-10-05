@@ -4,7 +4,8 @@
 [run-record](../operator/run-records.md) `baw run create`/`baw status`/`baw run diagnose`
 foundation, the read-only [`baw context`](../operator/context.md) role reference list and
 the [`baw run execute`](../operator/execution.md) local worker/verifier primitive and the
-[`baw run review`](../operator/review.md) reviewer-program primitive are implemented. Packaging checks are not execution tests. The earlier Python prototype's
+[`baw run review`](../operator/review.md) reviewer-program primitive and the
+[`baw run verify`](../operator/verification.md) verifier-program primitive are implemented. Packaging checks are not execution tests. The earlier Python prototype's
 test count is not evidence that a new Go implementation behaves correctly. Everything
 below those slices remains a future requirement.
 
@@ -350,6 +351,43 @@ result retained. Expected packets are hand-written; starts are counted by the fa
 
 Not covered: hostile same-user changes during a run, a hard filesystem time limit, and
 platforms other than darwin/arm64.
+
+## Implemented slice gates: verify
+
+The review gates apply, plus `TestVerificationBinaryJourneys` (same flags, `-v`, RUN/PASS and
+no skip; SHA-1 and SHA-256 are both required) against the same built artifact, with a compiled
+fake verifier only. For each format it follows the
+[operator example](../operator/verification.md#how-to-run-a-disposable-example): run create,
+then text and JSON passing (exit 0) and failing (exit 1, `verification_failed`) verifiers and a
+verifier that edits a tracked file (`candidate_changed`). Stdout and the separately read raw
+saved `intent.json` and `result.json` are compared with hand-written packets whose
+timestamps must be canonical, equal between intent and result, ordered, and inside the
+wall-clock window observed around the command; fixed impossible, malformed, stale, late,
+reversed and mismatched controls must be rejected by that oracle first. It also checks a
+replay (`verification_exists`), a dirty precondition (no attempt), a later descendant under a
+new ID, and that a dummy secret printed by the verifier never appears in output or receipts.
+
+Package tests in `internal/verification` and `internal/cli` (`verify_test.go`) cover plan
+parsing boundaries, safe plan reads and combined read/parse/close precedence, admission
+order, cross-format records (exit 2, unchanged state root, no start), layout, existing ID,
+each injected storage stage, cancellation boundaries, same-ID races, every usability fact,
+real program rows, packet validators, signal handler restoration and real SIGINT, SIGTERM
+and SIGKILL during an attempt. Report which of these actually ran on the identified candidate.
+
+Direct pipeline tests in `internal/verification` (not the CLI handler) run `Verify` in a
+bounded (10s), joined child of the test binary. Real SIGINT and SIGTERM are sent only after
+the child publishes a per-run nonce at the named boundary. The child acknowledges each signal
+it actually receives through a test-only `signal.Notify` channel, and a second interrupt is
+sent only after the first is acknowledged while the boundary is still held. For SIGKILL after
+the verifier actually starts, a finite fake verifier publishes a nonce while holding an
+exclusive fixture lock. The parent kills only its own controller child and checks the retained
+intent, no result, no output and one start. It then releases the lock and observes the
+verifier exit within a bound. No stored PID is signalled, and nothing is replayed. Special
+plan files are opened in joined children. With all three supplied fixture variables unset,
+a child binds a socket at a short relative name in a private test directory, and setuid and
+setgid bits are set on files the test creates, then observed. With a variable set, only that
+existing read-only fixture is read. Its type, owner and mode are validated, and its complete
+tree metadata and bytes must be unchanged. An absent or invalid supplied fixture fails.
 
 ## Layers
 

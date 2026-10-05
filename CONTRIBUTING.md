@@ -6,7 +6,8 @@ commands: the read-only [`baw inspect`](docs/operator/inspect.md) and
 [`baw run create` / `baw status` / `baw run diagnose`](docs/operator/run-records.md) for a local saved run record,
 the read-only [`baw context`](docs/operator/context.md) role reference list,
 [`baw run execute`](docs/operator/execution.md) for one trusted local worker and verifier attempt, and
-[`baw run review`](docs/operator/review.md) for one recorded reviewer-program verdict on a committed candidate; other controller surfaces do not exist yet. Build and test with [developer setup](docs/developer/environment.md), and
+[`baw run review`](docs/operator/review.md) for one recorded reviewer-program verdict on a committed candidate, and
+[`baw run verify`](docs/operator/verification.md) for one recorded verifier-program observation on a committed candidate; other controller surfaces do not exist yet. Build and test with [developer setup](docs/developer/environment.md), and
 report only checks actually run on the identified candidate.
 
 Use a reviewed work item with a bounded outcome, base commit, relevant context,

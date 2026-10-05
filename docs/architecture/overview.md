@@ -40,6 +40,10 @@ reviewer-program attempt in its own `review-v1` namespace after a saved `verific
 execute result, reading the execute receipts through read-only forwarders to the unchanged
 execute validators and re-inspecting the candidate with `internal/inspect`; a program verdict
 is an observation, not approval or verification of the candidate.
+`internal/verification` implements [`baw run verify`](../operator/verification.md): one
+recorded verifier-program attempt in its own `verify-v1` namespace, needing only a run record,
+reusing the unchanged execute plan command and executable checks and inspecting the candidate
+with `internal/inspect` before and after; it is not complete gate evidence, a source freeze or approval.
 
 Do not create all empty packages before they are needed. Begin with the smallest tested
 read-only slice. Interface/state choices require an approved specification before

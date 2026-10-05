@@ -1,0 +1,425 @@
+package verification
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"sort"
+	"syscall"
+)
+
+// Namespace is the version 1 verification attempt directory inside the
+// state root, disjoint from the run record, execute-v1 and review-v1
+// namespaces.
+const Namespace = "verify-v1"
+
+// hook is an internal test seam called before each named storage/process
+// stage. A non-nil error is treated as that stage's failure; close stages run
+// the real close first. Production code never sets it.
+var hook func(stage string) error
+
+func at(stage string) error {
+	if hook == nil {
+		return nil
+	}
+	return hook(stage)
+}
+
+// opened is an internal test observer given every plan, receipt, directory
+// and staging descriptor this package opens, so tests can prove each is
+// closed. Production code never sets it.
+var opened func(*os.File)
+
+func observe(f *os.File) {
+	if opened != nil && f != nil {
+		opened(f)
+	}
+}
+
+// rootPath re-derives the physical state root as the run record contract
+// resolves it. It is called only after state.OpenRoot validated it.
+func rootPath(dir string) (string, error) {
+	p, err := physical(dir)
+	if err != nil {
+		return "", fail(CodeStateUnavailable)
+	}
+	return p, nil
+}
+
+// checkPrivateDir classifies an existing path without following it. It
+// returns fs.ErrNotExist for an absent path.
+func checkPrivateDir(path string) (fs.FileInfo, error) {
+	fi, err := os.Lstat(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil, fs.ErrNotExist
+	case err != nil:
+		return nil, fail(CodeStateUnavailable)
+	case fi.Mode()&fs.ModeSymlink != 0 || !fi.IsDir():
+		return nil, fail(CodeUnsafeStatePath)
+	case !private(fi, 0o700):
+		return nil, fail(CodeStatePermissions)
+	}
+	return fi, nil
+}
+
+// checkNamespace validates an existing namespace without creating anything.
+func checkNamespace(ns string) error {
+	if _, err := checkPrivateDir(ns); err != nil && err != fs.ErrNotExist {
+		return err
+	}
+	return nil
+}
+
+// checkAttempt is the existing-attempt check: any safe existing ID directory
+// is verification_exists without opening its contents. Inaccessible I/O
+// other than type, owner or mode is verification_storage_unavailable.
+func checkAttempt(dir string) error {
+	switch _, err := checkPrivateDir(dir); {
+	case err == fs.ErrNotExist:
+		return nil
+	case IsCode(err, CodeStateUnavailable):
+		return fail(CodeStorageUnavailable)
+	case err != nil:
+		return err
+	}
+	return fail(CodeExists)
+}
+
+func openDir(path string) (*os.File, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, err
+	}
+	observe(f)
+	return f, nil
+}
+
+// openChecked opens a directory and rechecks type, owner, mode and identity
+// on the descriptor against a fresh Lstat.
+func openChecked(path, stage string) (*os.File, error) {
+	if err := at(stage + "-open"); err != nil {
+		return nil, err
+	}
+	lfi, err := checkPrivateDir(path)
+	if err != nil {
+		if err == fs.ErrNotExist {
+			return nil, fail(CodeStateChanged)
+		}
+		return nil, err
+	}
+	f, err := openDir(path)
+	if err != nil {
+		return nil, fail(CodeStateUnavailable)
+	}
+	fi, err := f.Stat()
+	if err == nil {
+		err = at(stage + "-recheck")
+	}
+	if err != nil {
+		f.Close()
+		return nil, fail(CodeStateUnavailable)
+	}
+	if err := openedDirSafety(fi, lfi); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return f, nil
+}
+
+// openedDirSafety checks an opened directory's type, owner and mode before
+// its identity against the earlier Lstat.
+func openedDirSafety(fi, lfi fs.FileInfo) error {
+	switch {
+	case !fi.IsDir():
+		return fail(CodeUnsafeStatePath)
+	case !private(fi, 0o700):
+		return fail(CodeStatePermissions)
+	case !os.SameFile(fi, lfi):
+		return fail(CodeStateChanged)
+	}
+	return nil
+}
+
+// preID maps a failure before the exclusive ID mkdir: an identified state
+// safety error is retained; any other failure is verification_storage_unavailable.
+func preID(err error) error {
+	if IsCode(err, CodeUnsafeStatePath) || IsCode(err, CodeStatePermissions) || IsCode(err, CodeStateChanged) {
+		return err
+	}
+	return fail(CodeStorageUnavailable)
+}
+
+// syncClose checks the directory holds exactly want, Syncs and closes it.
+func syncClose(f *os.File, stage string, want ...string) error {
+	err := at(stage + "-sync")
+	if err == nil {
+		names, rerr := f.Readdirnames(-1)
+		sort.Strings(names)
+		if rerr != nil || len(names) != len(want) {
+			err = fail(CodeStateChanged)
+		}
+		for i := 0; err == nil && i < len(want); i++ {
+			if names[i] != want[i] {
+				err = fail(CodeStateChanged)
+			}
+		}
+	}
+	if err == nil {
+		err = f.Sync()
+	}
+	cerr := f.Close()
+	if cerr == nil {
+		cerr = at(stage + "-close")
+	}
+	if err != nil {
+		return err
+	}
+	return cerr
+}
+
+// mkdirOwn exclusively creates a new 0700 directory and removes any umask
+// reduction from that new directory only.
+func mkdirOwn(path, stage string) error {
+	if err := at(stage + "-mkdir"); err != nil {
+		return err
+	}
+	if err := os.Mkdir(path, 0o700); err != nil {
+		return err
+	}
+	if err := at(stage + "-chmod"); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o700)
+}
+
+// acquire creates the namespace if needed and the exclusive attempt
+// directory with verifier/home and verifier/tmp, all synced and closed.
+// Failures and cancellation before the exclusive ID mkdir are retained state
+// safety, storage, durability or cancellation codes; afterwards every
+// failure is verification_uncertain. owned reports that this call created the ID directory.
+func acquire(root, ns, attempt string, cancelled func() bool) (owned bool, err error) {
+	if err := at("ns-mkdir"); err != nil {
+		return false, fail(CodeStorageUnavailable)
+	}
+	if err := os.Mkdir(ns, 0o700); err == nil {
+		if at("ns-chmod") != nil || os.Chmod(ns, 0o700) != nil {
+			return false, fail(CodeStorageUnavailable)
+		}
+	} else if !errors.Is(err, fs.ErrExist) {
+		return false, fail(CodeStorageUnavailable)
+	}
+	if err := checkNamespace(ns); err != nil {
+		return false, err
+	}
+	if _, err := checkPrivateDir(ns); err != nil {
+		return false, preID(err)
+	}
+	if cancelled() {
+		return false, fail(CodeCancelled)
+	}
+	// The root is synced even when the namespace already existed. Its open
+	// descriptor is rechecked for type, owner, mode and identity first.
+	rlfi, err := checkPrivateDir(root)
+	if err != nil {
+		return false, preID(err)
+	}
+	if at("root-lstat") != nil {
+		return false, fail(CodeStorageUnavailable)
+	}
+	rootDir, err := openDir(root)
+	if err != nil || at("root-open") != nil {
+		if rootDir != nil {
+			rootDir.Close()
+		}
+		return false, fail(CodeStorageUnavailable)
+	}
+	rfi, err := rootDir.Stat()
+	if err == nil {
+		err = at("root-recheck")
+	}
+	if err != nil {
+		rootDir.Close()
+		return false, fail(CodeStorageUnavailable)
+	}
+	if err := openedDirSafety(rfi, rlfi); err != nil {
+		rootDir.Close()
+		return false, err
+	}
+	serr := at("root-sync")
+	if serr == nil {
+		serr = rootDir.Sync()
+	}
+	cerr := rootDir.Close()
+	if cerr == nil {
+		cerr = at("root-close")
+	}
+	if serr != nil {
+		return false, fail(CodeDurability)
+	}
+	if cerr != nil {
+		return false, fail(CodeStorageUnavailable)
+	}
+	if cancelled() {
+		return false, fail(CodeCancelled)
+	}
+	nsDir, err := openChecked(ns, "ns")
+	if err != nil {
+		return false, preID(err)
+	}
+	if cancelled() {
+		nsDir.Close()
+		return false, fail(CodeCancelled)
+	}
+
+	// Exclusive attempt directory: only this mkdir grants ownership.
+	if err := at("id-mkdir"); err != nil {
+		nsDir.Close()
+		return false, fail(CodeStorageUnavailable)
+	}
+	if cancelled() {
+		nsDir.Close()
+		return false, fail(CodeCancelled)
+	}
+	if err := os.Mkdir(attempt, 0o700); err != nil {
+		nsDir.Close()
+		if errors.Is(err, fs.ErrExist) {
+			if err := checkAttempt(attempt); err != nil {
+				return false, err
+			}
+		}
+		return false, fail(CodeStorageUnavailable)
+	}
+	// From here on every failure is uncertain; nothing is removed.
+	uncertain := fail(CodeUncertain)
+	if at("id-chmod") != nil || os.Chmod(attempt, 0o700) != nil {
+		nsDir.Close()
+		return true, uncertain
+	}
+	serr = at("ns-sync")
+	if serr == nil {
+		serr = nsDir.Sync()
+	}
+	cerr = nsDir.Close()
+	if cerr == nil {
+		cerr = at("ns-close")
+	}
+	if serr != nil || cerr != nil {
+		return true, uncertain
+	}
+	idDir, err := openChecked(attempt, "id")
+	if err != nil {
+		return true, uncertain
+	}
+	if err := scratch(filepath.Join(attempt, "verifier")); err != nil {
+		idDir.Close()
+		return true, uncertain
+	}
+	if err := syncClose(idDir, "id", "verifier"); err != nil {
+		return true, uncertain
+	}
+	return true, nil
+}
+
+// scratch creates the verifier directory with its new empty home and tmp.
+func scratch(dir string) error {
+	if err := mkdirOwn(dir, "verifier"); err != nil {
+		return err
+	}
+	for _, sub := range []string{"home", "tmp"} {
+		stage := "verifier-" + sub
+		path := filepath.Join(dir, sub)
+		if err := mkdirOwn(path, stage); err != nil {
+			return err
+		}
+		f, err := openChecked(path, stage)
+		if err != nil {
+			return err
+		}
+		if err := syncClose(f, stage); err != nil {
+			return err
+		}
+	}
+	f, err := openChecked(dir, "verifier")
+	if err != nil {
+		return err
+	}
+	return syncClose(f, "verifier", "home", "tmp")
+}
+
+// publish exclusively writes data as name in the attempt directory: retained
+// staging file, Sync, close, hard link without replacement, directory Sync
+// and close. Any failure is returned; the caller reports uncertainty.
+func publish(attempt, name string, data []byte) error {
+	var rnd [16]byte
+	if err := at(name + "-random"); err != nil {
+		return err
+	}
+	if _, err := rand.Read(rnd[:]); err != nil {
+		return err
+	}
+	staging := filepath.Join(attempt, ".pending-"+name+"-"+hex.EncodeToString(rnd[:]))
+	if err := at(name + "-create"); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(staging, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return err
+	}
+	observe(f)
+	werr := at(name + "-chmod")
+	if werr == nil {
+		werr = f.Chmod(0o600)
+	}
+	if werr == nil {
+		werr = at(name + "-write")
+	}
+	if werr == nil {
+		var n int
+		n, werr = f.Write(data)
+		if werr == nil && n != len(data) {
+			werr = errors.New("short write")
+		}
+	}
+	if werr == nil {
+		werr = at(name + "-sync")
+	}
+	if werr == nil {
+		werr = f.Sync()
+	}
+	cerr := f.Close()
+	if cerr == nil {
+		cerr = at(name + "-close")
+	}
+	if werr != nil {
+		return werr
+	}
+	if cerr != nil {
+		return cerr
+	}
+	if err := at(name + "-link"); err != nil {
+		return err
+	}
+	if err := os.Link(staging, filepath.Join(attempt, name+".json")); err != nil {
+		return err
+	}
+	d, err := openChecked(attempt, name+"-dir")
+	if err != nil {
+		return err
+	}
+	serr := at(name + "-dir-sync")
+	if serr == nil {
+		serr = d.Sync()
+	}
+	cerr = d.Close()
+	if cerr == nil {
+		cerr = at(name + "-dir-close")
+	}
+	if serr != nil {
+		return serr
+	}
+	return cerr
+}
