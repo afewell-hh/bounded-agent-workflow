@@ -35,6 +35,11 @@ per-request role source list of [`baw context`](../operator/context.md).
 `internal/execution` implements [`baw run execute`](../operator/execution.md): one recorded
 local worker and verifier attempt in its own `execute-v1` namespace, using the observed
 runner of `internal/proc`; it has no native agent adapter, approval evaluation or recovery.
+`internal/review` implements [`baw run review`](../operator/review.md): one recorded
+reviewer-program attempt in its own `review-v1` namespace after a saved `verification_passed`
+execute result, reading the execute receipts through read-only forwarders to the unchanged
+execute validators and re-inspecting the candidate with `internal/inspect`; a program verdict
+is an observation, not approval or verification of the candidate.
 
 Do not create all empty packages before they are needed. Begin with the smallest tested
 read-only slice. Interface/state choices require an approved specification before

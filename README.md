@@ -17,7 +17,9 @@ read-only [`baw context`](docs/operator/context.md), which lists a lead, worker 
 onboarding document references (not an assignment or authority), and
 [`baw run execute`](docs/operator/execution.md), which runs one trusted local worker and one
 verification program in a recorded, never-repeated attempt (no native agent adapter, approval
-evaluation or recovery). There is no
+evaluation or recovery), and [`baw run review`](docs/operator/review.md), which records one trusted
+reviewer program's verdict on a clean committed candidate (not an approval, findings record or
+verification of that candidate). There is no
 controller, release, installed plugin or configured application. Other `baw` command
 examples remain proposed interfaces, not available commands.
 
@@ -81,6 +83,7 @@ Do not overlay this tooling seed or silently replace a project's governing polic
 | Save, read and diagnose a local run record | [Run records](docs/operator/run-records.md) |
 | List a role's onboarding document references | [`baw context`](docs/operator/context.md) |
 | Run one trusted local worker and verifier attempt | [`baw run execute`](docs/operator/execution.md) |
+| Record one reviewer-program verdict for a committed candidate | [`baw run review`](docs/operator/review.md) |
 | Prepare BAW's native Go development environment | [Developer setup](docs/developer/environment.md) — toolchain, build and test route |
 | Supply app/API secrets and control external writes | [Secrets and access](docs/developer/secrets-and-access.md) |
 | Complete routine tickets without per-merge human approvals | [GitHub single-account procedure](docs/operator/github-single-account.md) |
