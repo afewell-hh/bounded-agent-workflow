@@ -217,8 +217,15 @@ func TestVerifyValidatorsRejectInvalidMatchingRunID(t *testing.T) {
 // safety code wins over its distinct identity (state_changed), also with a
 // simultaneous close failure; the read and parse are never reached, the
 // descriptor is closed and the original inode is retained unchanged.
+//
+// The setuid row cannot rely on a chmod in every environment, so the original
+// plan stays in place and the reader-open seam opens a different, genuine
+// setuid inode with the reader's exact flags: the supplied read-only
+// BAW_TEST_DIAG_SPECIAL_FIXTURES file when set (validated, only opened, its
+// complete tree unchanged), otherwise a file created here whose actual setuid
+// bit is observed. A missing or invalid fixture or bit fails, never skips.
 func TestVerifyPlanUnsafeReplacementBeforeOpen(t *testing.T) {
-	defer func() { readHook = nil }()
+	defer func() { readHook, openFile = nil, nil }()
 	for _, c := range []struct {
 		name, want string
 		replace    func(t *testing.T, p string)
@@ -230,10 +237,6 @@ func TestVerifyPlanUnsafeReplacementBeforeOpen(t *testing.T) {
 		{"mode-0400", "state_permissions", func(t *testing.T, p string) {
 			write0600(t, p, []byte(`{}`))
 			os.Chmod(p, 0o400)
-		}},
-		{"setuid-0600", "state_permissions", func(t *testing.T, p string) {
-			write0600(t, p, []byte(`{}`))
-			os.Chmod(p, 0o600|fs.ModeSetuid)
 		}},
 		{"directory", "unsafe_state_path", func(t *testing.T, p string) { mkdir0700(t, p) }},
 	} {
@@ -279,6 +282,92 @@ func TestVerifyPlanUnsafeReplacementBeforeOpen(t *testing.T) {
 				!retFi.Mode().IsRegular() || retFi.Mode().Perm() != 0o600 || string(readFile(t, retained)) != string(original) {
 				t.Errorf("%s: identities original/retained/replacement not distinct as required (%v)", name, err)
 			}
+		}
+	}
+
+	const env = "BAW_TEST_DIAG_SPECIAL_FIXTURES"
+	var setuid, fixtureRoot, fixtureBefore string
+	if supplied := os.Getenv(env); supplied != "" {
+		fixtureRoot = supplied
+		fixtureBefore = fixtureTree(t, fixtureRoot)
+		setuid = suppliedSpecial(t, env, fixtureRoot, fs.ModeSetuid)
+	} else {
+		setuid = filepath.Join(resolvedTemp(t), "setuid-plan.json")
+		write0600(t, setuid, []byte(`{}`))
+		if err := os.Chmod(setuid, 0o600|fs.ModeSetuid); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setFi, err := os.Lstat(setuid)
+	if err != nil || !setFi.Mode().IsRegular() || setFi.Mode().Perm() != 0o600 ||
+		setFi.Mode()&(fs.ModeSetuid|fs.ModeSetgid|fs.ModeSticky) != fs.ModeSetuid ||
+		setFi.Sys().(*syscall.Stat_t).Uid != uint32(os.Getuid()) {
+		t.Fatalf("setuid file %s (supplied=%v) actual metadata %v: %v", setuid, fixtureRoot != "", setFi, err)
+	}
+	t.Logf("opened-setuid: supplied=%v observed mode %v", fixtureRoot != "", setFi.Mode())
+	wantFlag := os.O_RDONLY | syscall.O_NOFOLLOW | syscall.O_NONBLOCK
+	for _, closeFault := range []bool{false, true} {
+		name := "opened-setuid"
+		if closeFault {
+			name += "+close"
+		}
+		f := newFx(t, "sha1", "ok")
+		original := readFile(t, f.plan)
+		origFi, err := os.Lstat(f.plan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var hits []string
+		var fd *os.File
+		var fdFi fs.FileInfo
+		opens := 0
+		readHook = func(s string) error {
+			hits = append(hits, s)
+			if s == "plan-close" && closeFault {
+				return errors.New("close fault")
+			}
+			return nil
+		}
+		openFile = func(path string, flag int) (*os.File, error) {
+			opens++
+			if pfi, err := os.Lstat(path); err != nil || !os.SameFile(pfi, origFi) || flag != wantFlag {
+				t.Errorf("%s: open of %s flag %#x is not the Lstatted plan with the reader flags (%v)", name, path, flag, err)
+			}
+			var err error
+			if fd, err = os.OpenFile(setuid, flag, 0); err != nil {
+				return nil, err
+			}
+			fdFi, err = fd.Stat()
+			return fd, err
+		}
+		f.assertPre(t, name, context.Background(), f.req(f.head, true), "state_permissions") // asserts descriptors closed
+		readHook, openFile = nil, nil
+		if got := strings.Join(hits, ","); got != "plan-open,plan-close" || opens != 1 {
+			t.Errorf("%s: hits %s opens %d", name, got, opens)
+		}
+		if fd == nil || fdFi == nil {
+			t.Fatalf("%s: setuid inode not opened", name)
+		}
+		if _, err := fd.Stat(); !errors.Is(err, os.ErrClosed) {
+			t.Errorf("%s: opened setuid descriptor still open (%v)", name, err)
+		}
+		// The opened inode is the genuine setuid file, unsafe as observed
+		// through the descriptor, and distinct from the original.
+		if fileSafety(fdFi) == nil || fileSafety(fdFi).Error() != "state_permissions" || fdFi.Mode()&fs.ModeSetuid == 0 ||
+			!os.SameFile(fdFi, setFi) || os.SameFile(fdFi, origFi) {
+			t.Errorf("%s: opened metadata %v not the distinct unsafe setuid inode", name, fdFi.Mode())
+		}
+		after, err := os.Lstat(f.plan)
+		if err != nil || !os.SameFile(origFi, after) || after.Mode() != origFi.Mode() || string(readFile(t, f.plan)) != string(original) {
+			t.Errorf("%s: original plan inode, mode or bytes changed (%v)", name, err)
+		}
+	}
+	if fi, err := os.Lstat(setuid); err != nil || fi.Mode() != setFi.Mode() || !os.SameFile(fi, setFi) {
+		t.Errorf("setuid file changed %v -> %v (%v)", setFi.Mode(), fi, err)
+	}
+	if fixtureRoot != "" {
+		if after := fixtureTree(t, fixtureRoot); after != fixtureBefore {
+			t.Errorf("supplied fixture changed\nbefore:\n%s\nafter:\n%s", fixtureBefore, after)
 		}
 	}
 }

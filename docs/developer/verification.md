@@ -373,6 +373,12 @@ order, cross-format records (exit 2, unchanged state root, no start), layout, ex
 each injected storage stage, cancellation boundaries, same-ID races, every usability fact,
 real program rows, packet validators, signal handler restoration and real SIGINT, SIGTERM
 and SIGKILL during an attempt. Report which of these actually ran on the identified candidate.
+For an unsafe inode opened after the safe plan `Lstat`, `0644`, `0400` and directory
+replacements rename the original aside; the setuid row instead keeps the original in place
+and a test-only open seam (nil in production) opens a different genuine setuid file with the
+reader's flags: the supplied read-only special-bit fixture when its variable is set,
+otherwise a file created and observed here. Each expects the safety code before identity,
+also with a close fault, and the opened descriptor closed.
 
 Direct pipeline tests in `internal/verification` (not the CLI handler) run `Verify` in a
 bounded (10s), joined child of the test binary. Real SIGINT and SIGTERM are sent only after

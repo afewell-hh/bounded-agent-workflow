@@ -26,6 +26,11 @@ type Command = execution.Command
 // treated as that operation's failure. Production code never sets it.
 var readHook func(stage string) error
 
+// openFile is an internal test seam replacing the reader's open of the
+// physical path after the positive Lstat; it receives that path and the exact
+// open flags. Production code never sets it and calls os.OpenFile.
+var openFile func(path string, flag int) (*os.File, error)
+
 func readAt(stage string) error {
 	if readHook != nil {
 		return readHook(stage)
@@ -98,7 +103,13 @@ func safeRead(path, name string, limit int, missing, unavailable, closeFailed, t
 	if err := readAt(name + "-open"); err != nil {
 		return nil, fail(unavailable)
 	}
-	f, err := os.OpenFile(phys, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	flag := os.O_RDONLY | syscall.O_NOFOLLOW | syscall.O_NONBLOCK
+	var f *os.File
+	if openFile != nil {
+		f, err = openFile(phys, flag)
+	} else {
+		f, err = os.OpenFile(phys, flag, 0)
+	}
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ELOOP) {
 			return nil, fail(CodeStateChanged)
