@@ -76,7 +76,7 @@ The command sequence:
   set -e
   : "${baw_artifact_dir:?Set the new run-owned artifact directory first}"
   export GOTOOLCHAIN=local GOWORK=off GOPROXY=off CGO_ENABLED=0
-  go test -count=1 -timeout=2m ./...
+  go test -p 2 -count=1 -timeout=2m ./...
   go vet ./...
   go build -trimpath -o "$baw_artifact_dir/baw" ./cmd/baw
   go version -m "$baw_artifact_dir/baw"
@@ -92,24 +92,50 @@ they do not install BAW globally. See the [Go command reference](https://pkg.go.
 
 Apply a five-minute wall-clock limit per test, vet or build command, supervised by
 the invoking agent/operator. The test flag additionally limits each package's test
-binary to two minutes. Retain exit codes and sanitized output. On timeout or failure,
+binary to two minutes, and `-p 2` runs at most two packages' test binaries at once (see
+[test timing and scheduling](#test-timing-and-scheduling)). Retain exit codes and sanitized output. On timeout or failure,
 preserve evidence, reconcile any child processes and stop before the next gate; do not
 automatically reinstall tools, loosen checks or reset the attempt budget.
 
 ### Test timing and scheduling
 
-The full suite command above uses Go's default package parallelism (no `-p` flag). Observed
-history: under full-suite load the earlier `TestLimits` failed when its 300 ms timeout
-completed before the fake Git descendant's PID marker existed; ten isolated runs of the same
-test passed (1.80–1.87 s each), and an unchanged-base default full run later reproduced the
-failure. That suggests startup sensitivity but does not prove scheduling as the cause.
-[#24](https://github.com/afewell-hh/bounded-agent-workflow/issues/24) used `-p 2` for that
-ticket only (its `internal/cli` package took 96.9–101.5 s there).
-[#26](https://github.com/afewell-hh/bounded-agent-workflow/issues/26) replaced the timeout
-fixture; its first candidate passed `go test` under the default command but its
-`internal/cli` package took 111.2 s, over the 110 s acceptance ceiling, so it was not
-accepted. The ticket records the later candidate's actual runs and reviews; this page does
-not claim that the default command passed for it.
+The selected full-suite command is exactly `go test -p 2 -count=1 -timeout=2m ./...`.
+[#26](https://github.com/afewell-hh/bounded-agent-workflow/issues/26) chose it in a reviewed
+contract revision after the observations below; it is not an automatic fallback. The package
+set, every assertion, the focused command and all fixed ceilings are unchanged. Final full
+suites on a candidate, its fresh review and the merged tree each use this command once; an
+overrun or failure stops, with no automatic rerun and no further change to concurrency or
+ceilings.
+
+Observed history (earlier runs by other sessions, recorded on the tickets; none was run to
+write this page):
+
+- Under default full-suite load the earlier `TestLimits` failed when its 300 ms timeout
+  completed before the fake Git descendant's PID marker existed; ten isolated runs of the
+  same test passed (1.80–1.87 s each), and an unchanged-base default full run later
+  reproduced the failure. That suggested startup sensitivity but did not prove scheduling as
+  the cause. [#24](https://github.com/afewell-hh/bounded-agent-workflow/issues/24) used `-p 2`
+  for that ticket only (its `internal/cli` package took 96.9–101.5 s there).
+- #26 replaced the timeout fixture. Its first candidate passed `go test` under the default
+  command, but `internal/cli` took 111.2 s, over the 110 s acceptance ceiling, so it was not
+  accepted.
+- For candidate `e245faf`, the one required default-parallelism discovery run (no `-p`, all
+  three supplied fixture variables unset) passed with `internal/cli` at 109.170 s, and a run on
+  the clean commit took 108.292 s. That discovery is satisfied and is not repeated. The fresh
+  independent review's default run then exited 0 but `internal/cli` took 112.128 s, over
+  110 s; its later gates did not run and its required-fixes result stands.
+- A verification-only default run of the unchanged base `8b5f82a` passed with `internal/cli`
+  at 107.540 s (old `TestLimits` 1.97 s, wall time 110.486 s).
+
+Interpretation: `internal/cli` was already near its 110 s ceiling under default parallelism
+before this change. The repaired `TestLimits` takes 4.28–4.31 s in focused runs, about 2.3 s
+more than the old test, which by that arithmetic leaves roughly 0.2 s of margin, and the same
+bytes measured 108.3–112.1 s across environments. These observations motivate reducing package concurrency while preserving all checks:
+`TestLimits` passed in the recorded runs, but the package exceeded its timing budget.
+Contention is an inference from different runs, not a proof of cause, and the observations
+do not bound arbitrary load.
+The earlier `-p 2` package times come from #24's bytes; whether the selected command passes
+for a #26 candidate is recorded on #26, not here.
 
 `TestLimits` writes no executable for its timeout cases: each invocation runs in a
 re-executed test-binary controller with its own arguments, environment, process group and
@@ -148,9 +174,12 @@ and that the child then removed the root.
 Test budgets: the whole `TestLimits`, including setup, controls and finalization, fails above
 10 s; acceptance also requires five focused repetitions
 (`go test ./internal/cli -run '^TestLimits$' -count=5 -timeout=90s -v`) within 65 s and the
-`internal/cli` package within 110 s of the unchanged 2-minute suite limit. These are measured
-bounds on one darwin/arm64 host, not proof that the suite is free of flakes under other load
-or platforms; a startup later than the ready window or an overrun fails honestly.
+`internal/cli` package within 110 s of the unchanged 2-minute suite limit in each selected
+full-suite run. Each candidate repeats the five focused repetitions (90 s test timeout,
+150 s external supervision). These are measured bounds on one darwin/arm64 host, not proof
+that the suite is free of flakes under other load or platforms; five focused passes and a
+passing selected suite do not establish that either. A startup later than the ready window
+or an overrun fails honestly.
 
 ## First runnable acceptance
 
@@ -187,6 +216,17 @@ exit codes and outputs of terminal, JSON, invalid-repository, malformed-snapshot
 help and staged-gitlink runs. It also runs fake-`gh` journeys (no network) for the 64 KiB
 stderr boundary and for descendants left by a normal exit or an output overflow, and
 records whether each descendant was gone when the binary returned.
+
+This oldest journey creates its operator and staged-gitlink fixtures in SHA-1 only
+(`testfixture.Operator` and an explicit `sha1` initialization; inspected source). The six later
+binary journeys below each run SHA-1 and SHA-256, and the 76 legacy byte comparisons remain
+required. For SHA-256 coverage of this journey without editing it, #26 approved one
+additional run against the same identified binary with `go test -overlay`. The overlay uses
+private copies of exactly `internal/testfixture/fixture.go` and `cmd/baw/journey_test.go`, with
+only those two `sha1` literals changed to `sha256`. The run must confirm that both
+repositories report object format `sha256` with 64-hex `HEAD`, with RUN/PASS and no skip. It
+supplements the unchanged original run and never replaces checkout files. The overlay is a required check, not a result inferred from the original SHA-1 run;
+its execution results are recorded in #26's run evidence.
 
 Run-record journeys use the same flags with their own new directory:
 
