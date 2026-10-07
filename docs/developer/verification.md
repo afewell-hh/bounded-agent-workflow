@@ -13,9 +13,12 @@ below those slices remains a future requirement.
 
 Run with the [developer setup](environment.md) toolchain and commands:
 
-- `gofmt -l .` empty; `go test -count=1 -timeout=2m ./...`; `go vet ./...`;
+- `gofmt -l .` empty; `go test -p 2 -count=1 -timeout=2m ./...`; `go vet ./...`;
   `go build -trimpath -o NEW_ARTIFACT_DIR/baw ./cmd/baw`; `go version -m`; SHA-256.
-- Binary journeys (`TestBinaryJourneys`) against the built artifact.
+- Binary journeys (`TestBinaryJourneys`) against the built artifact. This journey uses
+  SHA-1 fixtures only. A supplementary SHA-256 run of it through a private Go overlay is
+  described in [developer setup](environment.md#first-runnable-acceptance). That supplement
+  is required by #26; its execution results are recorded in the ticket's run evidence.
 - Independent fresh reproduction and review, an authorized live read-only smoke against
   the coordination issue, and an operator exercise of the same binary. Package tests and
   fake `gh` do not prove native authentication or live GitHub behavior.
@@ -52,6 +55,30 @@ running) and a timeout. A descendant that leaves the group with `setsid` while h
 stdout makes the command fail within the join bound and is not signalled. These shapes
 were also run against the first candidate's process code, where they failed.
 
+Inspect timeouts (`TestLimits`): the Git-timeout and total-budget cases use restrictive
+limits of 1 s and 1.5 s with the other at 60 s, a fresh nonce acknowledged by a lock-holding
+descendant whose group the kernel reports as that of the fake Git leader started for this
+invocation, elapsed and readiness bounds from the actual clock origins, and lock-based proof
+that the descendant (and the leader) is gone before any rescue. Missing, wrong and stale
+acknowledgements, an escaped live descendant, a live descendant in another group and disabled
+timeouts are rejected by the same oracle; bounded finalization is tested for missing readiness,
+a failed controller and an unresponsive controller, and a child-process regression checks that
+an abrupt test failure during setup reconciles a live descendant before its fixture directory
+is removed. The selected full suite is exactly
+`go test -p 2 -count=1 -timeout=2m ./...`, chosen in #26's reviewed contract revision. It is
+not an automatic fallback. Under default parallelism `internal/cli` was already close to its
+110 s ceiling on the unchanged base (107.540 s). The repaired test adds about 2.3 s, and
+runs of the same candidate measured 108.292–112.128 s with `go test` exiting 0. That points to
+package runtime growth near the budget plus observed contention, not a remaining `TestLimits`
+failure, and it is not proof of cause. The single required default-parallelism discovery
+run already passed for `e245faf` (109.170 s) and is not repeated. Each candidate, its fresh
+review and the merged tree run the selected suite once, plus the five focused repetitions.
+Earlier failures stay recorded, and the ceilings are unchanged: 10 s test, 65 s for five
+focused runs, 110 s package, 120 s package timeout. The history and clock details are in
+[developer setup](environment.md#test-timing-and-scheduling), and run results are on
+[#26](https://github.com/afewell-hh/bounded-agent-workflow/issues/26). No universal flake
+freedom is claimed.
+
 Not covered: descendants that leave the group and release their pipes (they cannot be
 observed; see the [inspect guide](../operator/inspect.md#safety-properties-and-limits)),
 Git versions other than 2.39.5, and platforms other than darwin/arm64.
@@ -68,7 +95,8 @@ for the durable record links. Detailed results belong in the ticket's run eviden
 The same gofmt/test/vet/build/metadata/SHA-256 gates apply, plus both
 `TestBinaryJourneys` and `TestRunRecordBinaryJourneys` against the built artifact
 ([developer setup](environment.md#first-runnable-acceptance)). SHA-1 **and** SHA-256
-create/status journeys are mandatory in `internal/cli` and in the binary journey; an
+create/status journeys are mandatory in `internal/cli` and in `TestRunRecordBinaryJourneys`
+(the older `TestBinaryJourneys` is SHA-1 only); an
 unavailable SHA-256 fixture fails rather than skips.
 
 - `internal/state`: a hand-written nine-field oracle; exact 16384-byte whitespace-padded

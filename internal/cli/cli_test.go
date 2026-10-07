@@ -742,6 +742,11 @@ esac`)
 }
 
 func TestLimits(t *testing.T) {
+	checkLimitsBudget(t)
+	// The Git timeout and total-budget cases and their negative controls run
+	// in isolated controllers (limits_timeout_test.go) while the cap cases
+	// below run here.
+	timeouts := startLimitsTimeoutCases(t)
 	home := env(t)
 	dir := mustInit(t, home, t.TempDir(), "sha1")
 	tf.CommitSources(home, dir)
@@ -770,20 +775,10 @@ func TestLimits(t *testing.T) {
 	t.Setenv("PATH", noisy+":"+os.Getenv("PATH"))
 	wantFail(t, runCLI(t, nil, "inspect", "--repo", dir), 1, "command_output_limit")
 
-	// Git timeout via a slow fake git.
-	d := t.TempDir()
-	pidFile := filepath.Join(t.TempDir(), "pid")
-	script(t, filepath.Join(d, "git"), `sleep 30 & echo $! > '`+pidFile+`'; wait`)
-	t.Setenv("PATH", d+":"+os.Getenv("PATH"))
-	limits = inspect.DefaultLimits
-	limits.GitTimeout = 300 * time.Millisecond
-	wantFail(t, runCLI(t, &limits, "inspect", "--repo", dir), 1, "command_timeout")
-	assertProcessGone(t, pidFile)
-	// Total budget bounds the whole operation.
-	limits = inspect.DefaultLimits
-	limits.Total = 300 * time.Millisecond
-	wantFail(t, runCLI(t, &limits, "inspect", "--repo", dir), 1, "command_timeout")
-	assertProcessGone(t, pidFile)
+	// Git timeout via a slow fake git, and the total budget bounding the
+	// whole operation, each with nonce readiness and owned-descendant
+	// cleanup established before acceptance.
+	timeouts.finish(t)
 }
 
 func TestUsage(t *testing.T) {
