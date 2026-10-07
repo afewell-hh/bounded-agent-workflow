@@ -319,13 +319,8 @@ type ctxChildResult struct {
 	SameAsWarmUp      bool
 }
 
-func openFDs() []string {
-	ents, _ := os.ReadDir("/dev/fd")
-	var out []string
-	for _, e := range ents {
-		out = append(out, e.Name())
-	}
-	return out
+func openFDs() ([]string, error) {
+	return ctxObserveFDs(ctxFDOps{open: ctxOpenFDDir})
 }
 
 // TestContextChildProcess is executed only as a child of this test binary.
@@ -344,9 +339,15 @@ func TestContextChildProcess(t *testing.T) {
 	}
 	var out0, errb0, out, errb bytes.Buffer
 	code0 := Run(args, &out0, &errb0)
-	before := openFDs()
+	before, err := openFDs()
+	if err != nil {
+		t.Fatal(err)
+	}
 	code := Run(args, &out, &errb)
-	after := openFDs()
+	after, err := openFDs()
+	if err != nil {
+		t.Fatal(err)
+	}
 	same := code0 == code && out0.String() == out.String() && errb0.String() == errb.String()
 	b, err := json.Marshal(ctxChildResult{code, out.String(), errb.String(), before, after, same})
 	if err != nil {
@@ -359,39 +360,11 @@ func TestContextChildProcess(t *testing.T) {
 // waited for within 10 seconds.
 func runCtxChild(t *testing.T, args ...string) result {
 	t.Helper()
-	spec, err := json.Marshal(args)
+	r, err := runCtxChildWith(newCtxChildOps(context.WithTimeout, exec.CommandContext, time.Second), os.Environ(), args)
 	if err != nil {
 		t.Fatal(err)
 	}
-	exe := os.Args[0]
-	if !filepath.IsAbs(exe) {
-		t.Fatalf("test binary path %q is not absolute", exe)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, exe, "-test.run=^TestContextChildProcess$", "-test.count=1")
-	cmd.Env = append(os.Environ(), ctxChildEnv+"="+string(spec))
-	cmd.WaitDelay = time.Second
-	var out, errb cappedOutput
-	cmd.Stdout, cmd.Stderr = &out, &errb
-	start := time.Now()
-	err = cmd.Run() // waits for the child also when it is killed at the deadline
-	if ctx.Err() != nil {
-		t.Fatalf("context child %q not finished within 10s; killed and joined after %v (%v)", args, time.Since(start), err)
-	}
-	if err != nil {
-		t.Fatalf("context child %q: %v\nstdout %q\nstderr %q", args, err, out.b.String(), errb.b.String())
-	}
-	_, res, ok := strings.Cut(out.b.String(), ctxChildPrefix)
-	res, _, _ = strings.Cut(res, "\n")
-	var r ctxChildResult
-	if !ok || json.Unmarshal([]byte(res), &r) != nil {
-		t.Fatalf("context child %q reported no result: %q", args, out.b.String())
-	}
-	if len(r.FDBefore) == 0 || !reflect.DeepEqual(r.FDBefore, r.FDAfter) || !r.SameAsWarmUp {
-		t.Fatalf("context child %q: descriptors before %v after %v, repeat identical %v", args, r.FDBefore, r.FDAfter, r.SameAsWarmUp)
-	}
-	return result{r.Code, r.Stdout, r.Stderr}
+	return r
 }
 
 // Selected and common unsafe sources fail with fixed codes; an unsafe
@@ -401,7 +374,9 @@ func TestContextUnsafeSources(t *testing.T) {
 	home := env(t)
 	outside := t.TempDir()
 	mustWrite(t, filepath.Join(outside, "secret.md"), tf.SecretContent)
+	fixtures := 0
 	clean := func() string {
+		fixtures++
 		dir, _ := ctxFixture(t, home, "sha1")
 		return dir
 	}
@@ -425,12 +400,42 @@ func TestContextUnsafeSources(t *testing.T) {
 			}
 		}, "source_symlink"},
 	}
+	// The three role requests against one completed fixture run as one
+	// bounded batch of joined children. The parent touches the fixture again
+	// only after every child has joined and its index is unchanged.
+	ops := newCtxChildOps(context.WithTimeout, exec.CommandContext, time.Second)
+	parentEnv := os.Environ()
+	var ids []string
+	var results []result
+	batch := func(dir, id string, args ...string) []result {
+		t.Helper()
+		before, err := ctxIndexOf(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var reqs [][]string
+		for _, role := range ctxRoles {
+			reqs = append(reqs, append(append([]string(nil), args...), "--role", role))
+			ids = append(ids, id+role)
+		}
+		res, err := ctxBatch(parentEnv, reqs, func(env, args []string) (result, error) { return runCtxChildWith(ops, env, args) })
+		if err != nil {
+			t.Fatal(err)
+		}
+		after, err := ctxIndexOf(dir)
+		if err != nil || !bytes.Equal(after.data, before.data) || !after.mtime.Equal(before.mtime) {
+			t.Fatalf("index of %s changed during the batch (%v)", dir, err)
+		}
+		results = append(results, res...)
+		return res
+	}
 	for _, k := range kinds {
 		for _, bad := range ctxRoles {
 			dir := clean()
 			k.make(t, filepath.Join(dir, "workflow/roles", bad+".md"))
-			for _, role := range ctxRoles {
-				r := runCtxChild(t, "context", "--repo", dir, "--role", role, "--json")
+			res := batch(dir, "role/"+k.name+"/"+bad+"/", "context", "--repo", dir, "--json")
+			for i, role := range ctxRoles {
+				r := res[i]
 				if role == bad {
 					wantFail(t, r, 1, k.code)
 					continue
@@ -441,6 +446,7 @@ func TestContextUnsafeSources(t *testing.T) {
 				}
 			}
 			legacy := runCtxChild(t, "inspect", "--repo", dir)
+			ids, results = append(ids, "legacy/"+k.name+"/"+bad), append(results, legacy)
 			if bad == "lead" {
 				wantFail(t, legacy, 1, k.code)
 			} else if legacy.code != 0 || strings.Contains(legacy.stdout, bad+".md") {
@@ -451,8 +457,8 @@ func TestContextUnsafeSources(t *testing.T) {
 		for _, p := range []string{"AGENTS.md", "docs/operator/agent-lifecycle.md"} {
 			dir := clean()
 			k.make(t, filepath.Join(dir, p))
-			for _, role := range ctxRoles {
-				wantFail(t, runCtxChild(t, "context", "--repo", dir, "--role", role), 1, k.code)
+			for _, r := range batch(dir, "common/"+k.name+"/"+p+"/", "context", "--repo", dir) {
+				wantFail(t, r, 1, k.code)
 			}
 		}
 	}
@@ -465,9 +471,22 @@ func TestContextUnsafeSources(t *testing.T) {
 		if err := os.Symlink(real, filepath.Join(dir, anc)); err != nil {
 			t.Fatal(err)
 		}
-		for _, role := range ctxRoles {
-			wantFail(t, runCtxChild(t, "context", "--repo", dir, "--role", role), 1, "source_symlink")
+		for _, r := range batch(dir, "ancestor/"+anc+"/", "context", "--repo", dir) {
+			wantFail(t, r, 1, "source_symlink")
 		}
+	}
+	// Independent hand-written matrix: every request exactly once, in order,
+	// with its expected response, on 18 fixtures.
+	if err := ctxCheckMatrix(ids); err != nil {
+		t.Fatal(err)
+	}
+	for i, id := range ids {
+		if err := ctxWantMatrix(id, results[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if fixtures != 18 {
+		t.Fatalf("%d fixtures, want 18", fixtures)
 	}
 }
 

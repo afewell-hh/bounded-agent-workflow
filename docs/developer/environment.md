@@ -119,9 +119,10 @@ write this page):
 - #26 replaced the timeout fixture. Its first candidate passed `go test` under the default
   command, but `internal/cli` took 111.2 s, over the 110 s acceptance ceiling, so it was not
   accepted.
-- For candidate `e245faf`, the one required default-parallelism discovery run (no `-p`, all
-  three supplied fixture variables unset) passed with `internal/cli` at 109.170 s, and a run on
-  the clean commit took 108.292 s. That discovery is satisfied and is not repeated. The fresh
+- For candidate `e245faf`, the one default-parallelism discovery run that #26 required (no
+  `-p`, all three supplied fixture variables unset) passed with `internal/cli` at 109.170 s, and
+  a run on the clean commit took 108.292 s. That was a one-time requirement of #26's contract;
+  later candidates do not repeat it unless their own ticket requires it. The fresh
   independent review's default run then exited 0 but `internal/cli` took 112.128 s, over
   110 s; its later gates did not run and its required-fixes result stands.
 - A verification-only default run of the unchanged base `8b5f82a` passed with `internal/cli`
@@ -180,6 +181,96 @@ full-suite run. Each candidate repeats the five focused repetitions (90 s test t
 that the suite is free of flakes under other load or platforms; five focused passes and a
 passing selected suite do not establish that either. A startup later than the ready window
 or an overrun fails honestly.
+
+### Batched unsafe-source children
+
+`TestContextUnsafeSources` was the largest single test in one profiled `internal/cli` run
+(19.19 s of 99.197 s, #28). [#29](https://github.com/afewell-hh/bounded-agent-workflow/issues/29)
+keeps all of its 63 requests, 18 fixtures and 126 `Run` calls, and changes only how many of
+its child processes are in flight:
+
+- Each request still runs in its own child of the test binary, with its own copied argv and
+  environment, its own 64 KiB-capped captures, a 10 s context and a 1 s `WaitDelay`. The
+  child runs the request twice and lists its descriptors around the second call.
+- The three role requests against one completed fixture run together, at most three at a
+  time. The legacy `inspect` request for that fixture stays serial and runs after them.
+- The parent creates and changes fixtures and evaluates every original assertion itself. It
+  does so only after every started child has been joined. Results are matched by request
+  index, not completion order. A child error never stops the other queued requests; the
+  first error by index is reported. The parent adds no `t.Parallel`, `chdir`, signal handler
+  or environment change.
+- The children share the fixture read-only. The inspector's Git calls pass
+  `--no-optional-locks` (`internal/inspect`). The test checks this: it snapshots each fixture's `.git/index` bytes and modification time
+  before a batch and requires both unchanged after all children have joined. That catches
+  an index rewrite by the children. It does not isolate the fixture from other same-user
+  programs.
+- The parent joins each direct child. The test itself does not observe or contain every
+  Git descendant. The 10 s context with its 1 s `WaitDelay` is not an absolute wall-clock
+  bound on a join. Fixtures use `t.TempDir` cleanup, so a hard-killed test does not
+  retain them.
+
+Five controls (`TestContextBatchConcurrency`, `TestContextBatchRoutingAndMatrix`,
+`TestContextBatchFailureJoins`, `TestContextChildRunnerCompatibility`,
+`TestContextFDObservation`) check the batching and the descriptor observer. They use short
+fake controllers: each is a real child of the test binary that exits at once and is joined
+by the operation that started it. They check:
+
+- peak concurrency of exactly three, and that a fourth request does not start while three
+  are held;
+- routing by index and exact multiplicity, checked against a hand-written list of the 63
+  request IDs;
+- joins before the batch returns, on start, exit, report, descriptor, context and reader
+  failures;
+- error precedence and the unchanged runner diagnostics.
+
+Serial, unlimited, wrong-index and omit-and-duplicate executors must each be rejected for
+their own reason. The reader-failure control proves only that a read error the runner
+receives is propagated, not how the OS pipe fails. The context controls trigger
+cancellation directly; they do not measure the real 10 s timer.
+
+Descriptor observation. `openFDs` opens `/dev/fd` once, reads the entry names with
+`Readdirnames` and always closes the directory. It makes no per-entry metadata call. It
+fails on an open, read or close error (a read error is reported in preference to a close
+error) and on a non-numeric or duplicate name. It returns the names sorted, with nothing
+filtered or retried; the child fails on any observation error. The earlier `os.ReadDir`
+form ignored errors, and on this host it dropped standard handles that `fcntl(F_GETFD)`
+showed open when children ran concurrently. Exact before/after equality, a non-empty
+before list and the repeated-output check are unchanged. `TestContextFDObservation`
+checks the observer in two ways. First, through injected directories with hand-written
+expectations. Second, in real joined children: it confirms with `fcntl` that 0, 1 and 2
+are open and listed. It also holds an owned descriptor duplicated to a number of at least
+64, and requires the runner to reject the listing taken while that descriptor is open as
+`facts_invalid`. Once the descriptor is closed, the lists must be equal again.
+
+Known limits:
+
+- The listing is not atomic and may include the observer's own directory descriptor.
+- A reused descriptor number cannot be distinguished from the original.
+- On darwin the process supervisor's exit watcher signals completion before its deferred
+  `kqueue` close runs (`internal/proc/exitwatch_darwin.go`). So `Run` can return while that
+  descriptor is briefly still open, and an exact snapshot could catch it. A registered
+  diagnostic (eight repetitions, 1,008 snapshots, #29) observed no differing pair. That is
+  one sample, not proof that the race is gone.
+
+Any unequal list fails the test. It is not filtered or retried. If the difference is a
+watcher queue, the ordering fix belongs in a separate production ticket.
+
+Proposed acceptance for this change, set by #29's contract, has these ceilings:
+
+- each entire `TestContextUnsafeSources` repetition, including setup and finalization, at
+  most 12 s;
+- five focused repetitions
+  (`go test ./internal/cli -run '^TestContextUnsafeSources$' -count=5 -timeout=90s -v`)
+  within 65 s;
+- the five-control package
+  (`go test ./internal/cli -run '^(TestContextBatchConcurrency|TestContextBatchRoutingAndMatrix|TestContextBatchFailureJoins|TestContextChildRunnerCompatibility|TestContextFDObservation)$' -count=1 -timeout=90s -v`)
+  within 12 s;
+- `internal/cli` at most 100 s in each selected full suite, in addition to the inherited
+  110 s and 120 s limits.
+
+These are targets. A pass on the targets is not a performance guarantee. The first batched
+attempt failed its five focused repetitions on the old descriptor observer. That failure
+and the measured results of later candidates are recorded in #29's run evidence, not here.
 
 ## First runnable acceptance
 

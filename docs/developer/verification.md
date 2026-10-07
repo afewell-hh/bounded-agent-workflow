@@ -70,8 +70,9 @@ not an automatic fallback. Under default parallelism `internal/cli` was already 
 110 s ceiling on the unchanged base (107.540 s). The repaired test adds about 2.3 s, and
 runs of the same candidate measured 108.292–112.128 s with `go test` exiting 0. That points to
 package runtime growth near the budget plus observed contention, not a remaining `TestLimits`
-failure, and it is not proof of cause. The single required default-parallelism discovery
-run already passed for `e245faf` (109.170 s) and is not repeated. Each candidate, its fresh
+failure, and it is not proof of cause. #26's contract required one default-parallelism
+discovery run, which passed for `e245faf` (109.170 s). That was a one-time requirement of
+that ticket, not a gate for later candidates unless their own ticket requires it. Each candidate, its fresh
 review and the merged tree run the selected suite once, plus the five focused repetitions.
 Earlier failures stay recorded, and the ceilings are unchanged: 10 s test, 65 s for five
 focused runs, 110 s package, 120 s package timeout. The history and clock details are in
@@ -368,7 +369,11 @@ result retained. Expected packets are hand-written; starts are counted by the fa
   selected, common and ancestor symlinks, directories and FIFOs failing while the same
   unselected role files are not probed (legacy inspect still probes its lead file), each
   in a child of the test binary bounded to 10 seconds and always waited for, whose
-  open-descriptor list is identical before and after a repeated request; filter and
+  open-descriptor list (names read from `/dev/fd` without metadata calls; any observation
+  error fails the child) is identical before and after a repeated request; the 63
+  unsafe-source requests run up to three children at a time against completed fixtures, as
+  described under [batched unsafe-source children](environment.md#batched-unsafe-source-children),
+  with each fixture's `.git/index` bytes and modification time unchanged across a batch; filter and
   partial-clone guards and helper markers for every role; dummy secrets in role files,
   names, branch, message, remote and config never printed; repository bytes and metadata
   (not access time) unchanged; the 65,536/65,537-byte output helper; failing, short and
@@ -376,9 +381,19 @@ result retained. Expected packets are hand-written; starts are counted by the fa
   32 KiB cap; and alternating and 48 concurrent legacy/lead/worker/reviewer requests with
   exact per-call source lists. Concurrency runs in the `CGO_ENABLED=0` profile; no race
   detector result is claimed.
+- Batch and observer controls (#29): the five tests named in
+  [batched unsafe-source children](environment.md#batched-unsafe-source-children). These
+  include a held high descriptor in a real child, which the runner must reject as
+  `facts_invalid`. They run in every full suite and, together, as a separate gate (one run,
+  package within 12 s). Proposed gates also include five focused `TestContextUnsafeSources`
+  repetitions (each at most 12 s, within 65 s) and `internal/cli` at most 100 s in the selected
+  full suite.
 
 Not covered: hostile same-user changes during a run, a hard filesystem time limit, and
-platforms other than darwin/arm64.
+platforms other than darwin/arm64. The descriptor listing is not atomic, cannot detect
+descriptor-number reuse, and can observe the exit watcher's `kqueue` before its deferred
+close (a known ordering gap in `internal/proc`). Any unequal list fails rather than being
+filtered or retried; a sampled zero is not proof the race is absent.
 
 ## Implemented slice gates: verify
 
