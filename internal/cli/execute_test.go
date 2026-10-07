@@ -19,6 +19,7 @@ const wantGlobalUsage = "Usage:\n" +
 	"  baw context --repo PATH --role ROLE [--json]\n" +
 	"  baw run execute --repo PATH --state-dir DIR --run-id ID --plan FILE [--json]\n" +
 	"  baw run review --repo PATH --state-dir DIR --run-id ID --candidate OID --plan FILE [--json]\n" +
+	"  baw run verify --repo PATH --state-dir DIR --run-id ID --candidate OID --plan FILE [--json]\n" +
 	"  baw --help\n" +
 	"\n" +
 	"baw inspect reports read-only Git state counts, fixed maintained-source\n" +
@@ -44,7 +45,10 @@ const wantGlobalUsage = "Usage:\n" +
 	"provides no native adapter and never retries or recovers an interrupted attempt.\n" +
 	"\n" +
 	"Run review records one trusted reviewer-program verdict for a committed candidate;\n" +
-	"it evaluates no approval and supplies no native agent adapter, verification or merge authority.\n"
+	"it evaluates no approval and supplies no native agent adapter, verification or merge authority.\n" +
+	"\n" +
+	"Run verify records one local verifier-program result on an identified candidate;\n" +
+	"it grants no approval, source freeze, complete gate evidence or merge authority.\n"
 
 func TestGlobalUsageFrozenBytes(t *testing.T) {
 	if Usage != wantGlobalUsage {

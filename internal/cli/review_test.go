@@ -159,11 +159,15 @@ func TestReviewGlobalUsageDelta(t *testing.T) {
 	line := "  baw run review --repo PATH --state-dir DIR --run-id ID --candidate OID --plan FILE [--json]\n"
 	para := "\nRun review records one trusted reviewer-program verdict for a committed candidate;\n" +
 		"it evaluates no approval and supplies no native agent adapter, verification or merge authority.\n"
-	if strings.Count(Usage, line) != 1 || !strings.HasSuffix(Usage, para) ||
-		!strings.Contains(Usage, "[--json]\n"+line+"  baw --help\n") {
+	verifyLine := "  baw run verify --repo PATH --state-dir DIR --run-id ID --candidate OID --plan FILE [--json]\n"
+	verifyPara := "\nRun verify records one local verifier-program result on an identified candidate;\n" +
+		"it grants no approval, source freeze, complete gate evidence or merge authority.\n"
+	usage := strings.Replace(strings.TrimSuffix(Usage, verifyPara), verifyLine, "", 1)
+	if strings.Count(usage, line) != 1 || !strings.HasSuffix(usage, para) ||
+		!strings.Contains(usage, "[--json]\n"+line+"  baw --help\n") {
 		t.Fatal("review delta missing")
 	}
-	base := strings.Replace(strings.TrimSuffix(Usage, para), line, "", 1)
+	base := strings.Replace(strings.TrimSuffix(usage, para), line, "", 1)
 	if !strings.HasSuffix(base, "provides no native adapter and never retries or recovers an interrupted attempt.\n") ||
 		strings.Contains(base, "review --repo") {
 		t.Fatal("base text changed")

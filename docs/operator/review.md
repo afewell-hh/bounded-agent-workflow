@@ -62,6 +62,11 @@ candidate equal to `after_head` and once with a later committed descendant
 
 ## What a review does not cover (D1)
 
+A separate, standalone [`baw run verify`](verification.md) can record one
+verifier-program observation on the same candidate; compare its
+`repository.before_head` with this result's. It does not change review
+eligibility or authority and does not close the limitations below.
+
 Neither `review_passed` nor a pair of execute and review packets proves the
 candidate's quality, approval, acceptance or that the identified candidate was
 verified. Use the packets' repository fields, never file names, to see what
