@@ -271,6 +271,25 @@ the result retained; real SIGINT and SIGTERM during the worker give the publishe
   fixture and waits for its lock to be free, so its end is not inferred from any wait
   returning; no process ID is used. The existing `proc_test.go` regressions keep covering
   legacy `Run`.
+- `internal/proc` (`exitwatch_darwin_test.go`, #32): the darwin exit watcher's ordering,
+  through per-call operations (no package hook). `TestExitWatchOrdering` holds the scripted
+  Close call open after it acknowledges entry and requires both signals still unsent, then
+  exactly the selected one, one Close call and a hand-written call sequence, for exit,
+  terminal wait error, EINTR retries, irrelevant/empty events, a close error alone (still
+  exit) and wait plus close errors (still failure). The earlier signal-then-deferred-close
+  order is rejected by the same check for each signal, for premature signalling only.
+  `TestExitWatchSetup` covers creation failure (no close) and registration failure (one
+  close; the registration error wins over a close error). `TestExitWatchKernel` watches a
+  real direct child of the test binary on a real queue, for its real exit and for an
+  injected wait error. Its close wrapper checks the queue is open, requires the real Close
+  to succeed and `fcntl(F_GETFD)` to report `EBADF` immediately after, all before either
+  signal; the child is then reaped through its own handle. Each test joins the watcher
+  goroutine by its own completion signal, not by the notification. Descriptor identity
+  under concurrent reuse is not established: if another thread reused the number between
+  Close and the check, the test fails without retrying, and it never closes that number
+  again. Proposed gate:
+  `go test ./internal/proc -run '^TestExitWatch' -count=5 -timeout=90s -v`, all three tests
+  run and pass five times, package within 30 s.
 - `internal/cli` (`execute_test.go`): frozen global and execute help bytes, syntax errors and
   restoration of the caller's signal handling after execute returns.
 
@@ -390,10 +409,12 @@ result retained. Expected packets are hand-written; starts are counted by the fa
   full suite.
 
 Not covered: hostile same-user changes during a run, a hard filesystem time limit, and
-platforms other than darwin/arm64. The descriptor listing is not atomic, cannot detect
-descriptor-number reuse, and can observe the exit watcher's `kqueue` before its deferred
-close (a known ordering gap in `internal/proc`). Any unequal list fails rather than being
-filtered or retried; a sampled zero is not proof the race is absent.
+platforms other than darwin/arm64. The descriptor listing is not atomic and cannot detect
+descriptor-number reuse. The exit watcher now finishes its one `kqueue` close call before
+it signals (#32), with the limits listed under
+[batched unsafe-source children](environment.md#batched-unsafe-source-children); #29's
+sampled zero for the earlier order remains history, not proof. Any unequal list fails
+rather than being filtered or retried.
 
 ## Implemented slice gates: verify
 
