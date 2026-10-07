@@ -52,6 +52,21 @@ running) and a timeout. A descendant that leaves the group with `setsid` while h
 stdout makes the command fail within the join bound and is not signalled. These shapes
 were also run against the first candidate's process code, where they failed.
 
+Inspect timeouts (`TestLimits`): the Git-timeout and total-budget cases use restrictive
+limits of 1 s and 1.5 s with the other at 60 s, a fresh nonce acknowledged by a lock-holding
+descendant whose group the kernel reports as that of the fake Git leader started for this
+invocation, elapsed and readiness bounds from the actual clock origins, and lock-based proof
+that the descendant (and the leader) is gone before any rescue. Missing, wrong and stale
+acknowledgements, an escaped live descendant, a live descendant in another group and disabled
+timeouts are rejected by the same oracle; bounded finalization is tested for missing readiness,
+a failed controller and an unresponsive controller, and a child-process regression checks that
+an abrupt test failure during setup reconciles a live descendant before its fixture directory
+is removed. The full suite uses the default command
+above (no `-p`); #26's first candidate exceeded the 110 s package ceiling under it. The
+scheduling history, clock details and test budgets (10 s test, 65 s for five focused runs,
+110 s package) are in [developer setup](environment.md#test-timing-and-scheduling). No
+universal flake freedom is claimed.
+
 Not covered: descendants that leave the group and release their pipes (they cannot be
 observed; see the [inspect guide](../operator/inspect.md#safety-properties-and-limits)),
 Git versions other than 2.39.5, and platforms other than darwin/arm64.

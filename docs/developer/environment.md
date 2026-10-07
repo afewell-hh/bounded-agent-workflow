@@ -96,6 +96,62 @@ binary to two minutes. Retain exit codes and sanitized output. On timeout or fai
 preserve evidence, reconcile any child processes and stop before the next gate; do not
 automatically reinstall tools, loosen checks or reset the attempt budget.
 
+### Test timing and scheduling
+
+The full suite command above uses Go's default package parallelism (no `-p` flag). Observed
+history: under full-suite load the earlier `TestLimits` failed when its 300 ms timeout
+completed before the fake Git descendant's PID marker existed; ten isolated runs of the same
+test passed (1.80–1.87 s each), and an unchanged-base default full run later reproduced the
+failure. That suggests startup sensitivity but does not prove scheduling as the cause.
+[#24](https://github.com/afewell-hh/bounded-agent-workflow/issues/24) used `-p 2` for that
+ticket only (its `internal/cli` package took 96.9–101.5 s there).
+[#26](https://github.com/afewell-hh/bounded-agent-workflow/issues/26) replaced the timeout
+fixture; its first candidate passed `go test` under the default command but its
+`internal/cli` package took 111.2 s, over the 110 s acceptance ceiling, so it was not
+accepted. The ticket records the later candidate's actual runs and reviews; this page does
+not claim that the default command passed for it.
+
+`TestLimits` writes no executable for its timeout cases: each invocation runs in a
+re-executed test-binary controller with its own arguments, environment, process group and
+fixture directory, and the fake Git is the test binary reached through a symlink named `git`.
+This reduces fixture setup and is a test-only choice. The fake Git records a fresh leader
+nonce with its PID and starts one descendant in the application's process group, which takes an exclusive lock and only then writes a fresh
+per-case nonce with its PID and group. A case is accepted only if: that exact nonce arrived
+within the ready window and before return; the kernel, while both were live, reported the
+leader as leader of its own group and the descendant in exactly that group; the result is exit
+1, empty stdout and `baw: command_timeout`; the elapsed time is within [limit, limit + 1 s grace
++ both 1 s join bounds + 250 ms startup allowance]; and within 500 ms of return the lock was free
+and the kernel no longer knew the leader, before any rescue (the descendant's own lifetime is
+20 s). Clock origins: `Total` starts before discovery; `GitTimeout` starts after the Git child
+is started, so readiness may precede it; neither is reset by the acknowledgement. The
+restrictive limits are 1 s (`GitTimeout`) and 1.5 s (`Total`), the other limit 60 s; ready
+windows are 1.25 s and 1.5 s from invocation start.
+
+Negative controls go through the same oracle and must be rejected for the expected reason
+before a cooperative file-based rescue: missing, wrong and stale nonces, a descendant that
+leaves the group after being observed, a live descendant acknowledging from another group,
+and disabled timeouts (rejected at the 4.25 s upper bound). Finalization is tested too: a
+missing acknowledgement, a controller that dies leaving its descendant, and a controller that
+ignores the request. The finalizer is registered before any process starts and all fixtures
+live under one private root that only it removes, so a test failure at any point cannot delete
+fixture evidence first. It asks the controller to exit through a private token, asks a live
+descendant to exit and observes it and the leader gone and the invocation returned (or the
+controller exited), and only then kills a still-running controller through its owned handle.
+Every wait is bounded; if a bound passes first nothing is killed, the case is reported
+unreconciled and the root is retained. No stored PID is signalled. A regression re-runs
+`TestLimits` in a child test process that fails abruptly during setup once its first
+descendant acknowledged a nonce issued by the parent; the parent, holding the descendant's
+lock file open, checks that the lock was free and the leader gone while the child's fixture
+directory still existed, that the controller finished its own rescue without being killed,
+and that the child then removed the root.
+
+Test budgets: the whole `TestLimits`, including setup, controls and finalization, fails above
+10 s; acceptance also requires five focused repetitions
+(`go test ./internal/cli -run '^TestLimits$' -count=5 -timeout=90s -v`) within 65 s and the
+`internal/cli` package within 110 s of the unchanged 2-minute suite limit. These are measured
+bounds on one darwin/arm64 host, not proof that the suite is free of flakes under other load
+or platforms; a startup later than the ready window or an overrun fails honestly.
+
 ## First runnable acceptance
 
 Once the first executable slice exists, the worker runs the implemented tests and
