@@ -406,8 +406,10 @@ func TestContextUnsafeSources(t *testing.T) {
 	ops := newCtxChildOps(context.WithTimeout, exec.CommandContext, time.Second)
 	parentEnv := os.Environ()
 	var ids []string
+	var argvs [][]string
+	var dirs []string
 	var results []result
-	batch := func(dir, id string, args ...string) []result {
+	batch := func(dir, id string, request func(role string) []string) []result {
 		t.Helper()
 		before, err := ctxIndexOf(dir)
 		if err != nil {
@@ -415,8 +417,9 @@ func TestContextUnsafeSources(t *testing.T) {
 		}
 		var reqs [][]string
 		for _, role := range ctxRoles {
-			reqs = append(reqs, append(append([]string(nil), args...), "--role", role))
+			reqs = append(reqs, request(role))
 			ids = append(ids, id+role)
+			argvs, dirs = append(argvs, append([]string(nil), reqs[len(reqs)-1]...)), append(dirs, dir)
 		}
 		res, err := ctxBatch(parentEnv, reqs, func(env, args []string) (result, error) { return runCtxChildWith(ops, env, args) })
 		if err != nil {
@@ -433,7 +436,9 @@ func TestContextUnsafeSources(t *testing.T) {
 		for _, bad := range ctxRoles {
 			dir := clean()
 			k.make(t, filepath.Join(dir, "workflow/roles", bad+".md"))
-			res := batch(dir, "role/"+k.name+"/"+bad+"/", "context", "--repo", dir, "--json")
+			res := batch(dir, "role/"+k.name+"/"+bad+"/", func(role string) []string {
+				return []string{"context", "--repo", dir, "--role", role, "--json"}
+			})
 			for i, role := range ctxRoles {
 				r := res[i]
 				if role == bad {
@@ -447,6 +452,7 @@ func TestContextUnsafeSources(t *testing.T) {
 			}
 			legacy := runCtxChild(t, "inspect", "--repo", dir)
 			ids, results = append(ids, "legacy/"+k.name+"/"+bad), append(results, legacy)
+			argvs, dirs = append(argvs, []string{"inspect", "--repo", dir}), append(dirs, dir)
 			if bad == "lead" {
 				wantFail(t, legacy, 1, k.code)
 			} else if legacy.code != 0 || strings.Contains(legacy.stdout, bad+".md") {
@@ -457,7 +463,9 @@ func TestContextUnsafeSources(t *testing.T) {
 		for _, p := range []string{"AGENTS.md", "docs/operator/agent-lifecycle.md"} {
 			dir := clean()
 			k.make(t, filepath.Join(dir, p))
-			for _, r := range batch(dir, "common/"+k.name+"/"+p+"/", "context", "--repo", dir) {
+			for _, r := range batch(dir, "common/"+k.name+"/"+p+"/", func(role string) []string {
+				return []string{"context", "--repo", dir, "--role", role}
+			}) {
 				wantFail(t, r, 1, k.code)
 			}
 		}
@@ -471,7 +479,9 @@ func TestContextUnsafeSources(t *testing.T) {
 		if err := os.Symlink(real, filepath.Join(dir, anc)); err != nil {
 			t.Fatal(err)
 		}
-		for _, r := range batch(dir, "ancestor/"+anc+"/", "context", "--repo", dir) {
+		for _, r := range batch(dir, "ancestor/"+anc+"/", func(role string) []string {
+			return []string{"context", "--repo", dir, "--role", role}
+		}) {
 			wantFail(t, r, 1, "source_symlink")
 		}
 	}
@@ -482,6 +492,9 @@ func TestContextUnsafeSources(t *testing.T) {
 	}
 	for i, id := range ids {
 		if err := ctxWantMatrix(id, results[i]); err != nil {
+			t.Fatal(err)
+		}
+		if err := ctxWantArgv(id, dirs[i], argvs[i]); err != nil {
 			t.Fatal(err)
 		}
 	}

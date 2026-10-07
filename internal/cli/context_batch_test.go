@@ -314,6 +314,27 @@ func ctxWantMatrix(id string, r result) error {
 	return nil
 }
 
+// ctxWantArgv checks a request's argument vector against the original call
+// written by hand for its ID form; dir is the fixture the request targeted.
+func ctxWantArgv(id, dir string, argv []string) error {
+	role := id[strings.LastIndex(id, "/")+1:]
+	var want []string
+	switch strings.Split(id, "/")[0] {
+	case "role":
+		want = []string{"context", "--repo", dir, "--role", role, "--json"}
+	case "legacy":
+		want = []string{"inspect", "--repo", dir}
+	case "common", "ancestor":
+		want = []string{"context", "--repo", dir, "--role", role}
+	default:
+		return fmt.Errorf("%s: no original argument vector", id)
+	}
+	if !slices.Equal(argv, want) {
+		return fmt.Errorf("%s: argv %q want %q", id, argv, want)
+	}
+	return nil
+}
+
 // --- real finite fake controllers for the batch controls ---
 //
 // A fake run operation starts a real controller through its own handle: this
@@ -328,6 +349,8 @@ type ctlBehavior struct {
 	exitFail  bool   // the controller exits 1 (child helper rejects "[]")
 	readFault bool   // drain output through a Reader whose Read fails
 	out       string // written to the request's stdout capture; "" = good report
+	awaitHeld bool   // before Start, wait (bounded) for request prereq's held acknowledgement
+	prereq    int
 }
 
 type ctlAck struct {
@@ -342,10 +365,13 @@ type ctlRec struct {
 	behaviors map[int]ctlBehavior
 	acks      chan ctlAck
 	release   map[int]chan struct{}
+	heldAck   map[int]chan struct{} // closed once request id has started and is held
 	watchdog  time.Duration
-	fixture   string // must exist when each controller is joined
+	ackWait   time.Duration // bound for a held acknowledgement before Start
+	fixture   string        // must exist when each controller is joined
 
 	mu             sync.Mutex
+	heldAcked      map[int]bool
 	active, peak   int
 	attempts       map[int]int
 	started        map[int]bool
@@ -367,11 +393,13 @@ func (ctlFaultReader) Read([]byte) (int, error) { return 0, errCtlRead }
 
 func newCtlRec(t *testing.T, n int, held map[int]bool, behaviors map[int]ctlBehavior) *ctlRec {
 	rec := &ctlRec{t: t, missing: filepath.Join(t.TempDir(), "missing-controller"), held: held, behaviors: behaviors,
-		acks: make(chan ctlAck, 4*n+8), release: map[int]chan struct{}{}, watchdog: 3 * time.Second,
+		acks: make(chan ctlAck, 4*n+8), release: map[int]chan struct{}{}, heldAck: map[int]chan struct{}{},
+		watchdog: 3 * time.Second, ackWait: time.Second, heldAcked: map[int]bool{},
 		attempts: map[int]int{}, started: map[int]bool{}, joined: map[int]bool{}, argv: map[int][]string{},
 		env: map[int][]string{}, bufs: map[*cappedOutput]bool{}, parsedRequests: map[int][]string{}}
 	for i := range n {
 		rec.release[i] = make(chan struct{})
+		rec.heldAck[i] = make(chan struct{})
 	}
 	return rec
 }
@@ -443,6 +471,7 @@ func (r *ctlRec) run(ctx context.Context, exe string, argv, env []string, stdout
 	r.bufs[stdout], r.bufs[stderr] = true, true
 	b := r.behaviors[id]
 	rel := r.release[id]
+	prereq := r.heldAck[b.prereq]
 	r.mu.Unlock()
 	defer func() {
 		r.mu.Lock()
@@ -456,6 +485,14 @@ func (r *ctlRec) run(ctx context.Context, exe string, argv, env []string, stdout
 	}
 	if b.exitFail {
 		ctlEnv = append(ctlEnv, ctxChildEnv+"=[]")
+	}
+	if b.awaitHeld {
+		select {
+		case <-prereq:
+			r.event(fmt.Sprintf("prereq:%d", id))
+		case <-time.After(r.ackWait):
+			r.problem("request %d: request %d not acknowledged held before start", id, b.prereq)
+		}
 	}
 	cmd := exec.Command(ctlExe, argv...)
 	cmd.Env = ctlEnv
@@ -479,6 +516,13 @@ func (r *ctlRec) run(ctx context.Context, exe string, argv, env []string, stdout
 	r.mu.Unlock()
 	r.acks <- ctlAck{id, ctx}
 	if r.held[id] {
+		r.mu.Lock()
+		if !r.heldAcked[id] {
+			r.heldAcked[id] = true
+			r.events = append(r.events, fmt.Sprintf("held:%d", id))
+			close(r.heldAck[id])
+		}
+		r.mu.Unlock()
 		select {
 		case <-rel:
 		case <-time.After(r.watchdog):
@@ -879,6 +923,41 @@ func TestContextBatchRoutingAndMatrix(t *testing.T) {
 			t.Fatalf("%s accepted wrong response %+v", id, r)
 		}
 	}
+	// The argument-vector rules accept only the original order, target and
+	// role of each request form.
+	const d = "/fixture"
+	for _, c := range []struct {
+		id   string
+		argv []string
+		ok   bool
+	}{
+		{"role/fifo/lead/worker", []string{"context", "--repo", d, "--role", "worker", "--json"}, true},
+		{"role/fifo/lead/worker", []string{"context", "--repo", d, "--json", "--role", "worker"}, false},
+		{"role/fifo/lead/worker", []string{"context", "--repo", d, "--role", "lead", "--json"}, false},
+		{"role/fifo/lead/worker", []string{"context", "--repo", "/other", "--role", "worker", "--json"}, false},
+		{"legacy/fifo/worker", []string{"inspect", "--repo", d}, true},
+		{"legacy/fifo/worker", []string{"inspect", "--repo", d, "--json"}, false},
+		{"common/fifo/AGENTS.md/reviewer", []string{"context", "--repo", d, "--role", "reviewer"}, true},
+		{"common/fifo/AGENTS.md/reviewer", []string{"context", "--repo", d, "--role", "reviewer", "--json"}, false},
+		{"ancestor/docs/lead", []string{"context", "--repo", d, "--role", "lead"}, true},
+		{"ancestor/docs/lead", []string{"context", "--role", "lead", "--repo", d}, false},
+	} {
+		if err := ctxWantArgv(c.id, d, c.argv); (err == nil) != c.ok {
+			t.Fatalf("%s %q: %v", c.id, c.argv, err)
+		}
+	}
+}
+
+// ctlStartFailOrder checks from the recorded events that request id's failed
+// Start came after request prereq had started and acknowledged its hold,
+// after id observed that acknowledgement, and before prereq was joined.
+func ctlStartFailOrder(events []string, prereq, id int) error {
+	at := func(f string, n int) int { return slices.Index(events, fmt.Sprintf(f, n)) }
+	s, h, p, f, j := at("start:%d", prereq), at("held:%d", prereq), at("prereq:%d", id), at("startfail:%d", id), at("join:%d", prereq)
+	if s < 0 || h < 0 || p < 0 || f < 0 || j < 0 || !(s < h && h < p && p < f && f < j) {
+		return fmt.Errorf("start failure of request %d not after held request %d: %v", id, prereq, events)
+	}
+	return nil
 }
 
 func TestContextBatchFailureJoins(t *testing.T) {
@@ -891,7 +970,10 @@ func TestContextBatchFailureJoins(t *testing.T) {
 		wantKind  string
 		wantCause error
 	}{
-		{"later-start-failure", map[int]ctlBehavior{1: {startFail: true}}, nil, 1, ctxErrProcess, nil},
+		{"later-start-failure", map[int]ctlBehavior{1: {startFail: true, awaitHeld: true, prereq: 0}}, nil, 1, ctxErrProcess, nil},
+		// Negative control: request 2 is never held, so the gate must report
+		// the missing acknowledgement within its bound and the order fails.
+		{"start-failure-missing-held-ack", map[int]ctlBehavior{1: {startFail: true, awaitHeld: true, prereq: 2}}, nil, 1, ctxErrProcess, nil},
 		{"nonzero-exit", map[int]ctlBehavior{1: {exitFail: true, out: "no report\n"}}, nil, 1, ctxErrProcess, nil},
 		{"missing-report", map[int]ctlBehavior{1: {out: "no report\n"}}, nil, 1, ctxErrReport, nil},
 		{"malformed-report", map[int]ctlBehavior{1: {out: ctxChildPrefix + "{bad\n"}}, nil, 1, ctxErrReport, nil},
@@ -1006,10 +1088,25 @@ func TestContextBatchFailureJoins(t *testing.T) {
 		if !slices.Equal(rec.events[ret:], []string{"return", "oracle", "fixture-delete", "env-restore"}) {
 			failures = append(failures, fmt.Sprintf("parent events %v", rec.events[ret:]))
 		}
+		missingAck := false
+		for id, b := range c.b {
+			if !b.awaitHeld {
+				continue
+			}
+			err := ctlStartFailOrder(rec.events, b.prereq, id)
+			if held[b.prereq] != (err == nil) {
+				failures = append(failures, fmt.Sprintf("held prerequisite %v, order check %v", held[b.prereq], err))
+			}
+			missingAck = missingAck || !held[b.prereq]
+		}
+		const noAck = "not acknowledged held before start"
 		for _, p := range rec.problems {
-			if !strings.Contains(p, "watchdog") {
+			if !strings.Contains(p, "watchdog") && !(missingAck && strings.Contains(p, noAck)) {
 				failures = append(failures, p)
 			}
+		}
+		if missingAck && !slices.ContainsFunc(rec.problems, func(p string) bool { return strings.Contains(p, noAck) }) {
+			failures = append(failures, "missing held acknowledgement not reported")
 		}
 		if len(failures) != 0 {
 			t.Fatalf("%s: %v (events %v)", c.name, failures, rec.events)
