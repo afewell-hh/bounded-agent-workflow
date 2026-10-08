@@ -246,14 +246,21 @@ Known limits:
 
 - The listing is not atomic and may include the observer's own directory descriptor.
 - A reused descriptor number cannot be distinguished from the original.
-- On darwin the process supervisor's exit watcher signals completion before its deferred
-  `kqueue` close runs (`internal/proc/exitwatch_darwin.go`). So `Run` can return while that
-  descriptor is briefly still open, and an exact snapshot could catch it. A registered
-  diagnostic (eight repetitions, 1,008 snapshots, #29) observed no differing pair. That is
-  one sample, not proof that the race is gone.
+- On darwin the process supervisor's exit watcher (`internal/proc/exitwatch_darwin.go`)
+  now makes its one `kqueue` close call before it signals exit or watcher failure
+  ([#32](https://github.com/afewell-hh/bounded-agent-workflow/issues/32)). Until then it
+  signalled first and closed the queue in a deferred call, so `Run` could return while the
+  queue was briefly still open. A registered #29 diagnostic of that earlier code (eight
+  repetitions, 1,008 snapshots) observed no differing pair; that was one sample, not proof
+  that the race was absent.
+- The close error is still ignored, as before. If the OS reports one, the signal follows
+  the completed close attempt but does not establish that the queue was released. The
+  watcher goroutine itself, other descriptors and descendants are not covered by this
+  ordering. When `Run` returns without having received a watcher signal (for example a
+  leader not seen to exit by the end of cleanup, which is then reaped in the background),
+  the queue stays open until the watcher finishes, as before.
 
-Any unequal list fails the test. It is not filtered or retried. If the difference is a
-watcher queue, the ordering fix belongs in a separate production ticket.
+Any unequal list fails the test. It is not filtered or retried.
 
 Proposed acceptance for this change, set by #29's contract, has these ceilings:
 
