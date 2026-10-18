@@ -350,6 +350,27 @@ the result retained; real SIGINT and SIGTERM during the worker give the publishe
   again. Proposed gate:
   `go test ./internal/proc -run '^TestExitWatch' -count=5 -timeout=90s -v`, all three tests
   run and pass five times, package within 30 s.
+- `internal/proc` (#38 C1 setup fallback; these tests are new and are not results):
+  `TestExitFallbackSetup` (`exitwatch_fallback_darwin_test.go`) drives the same scripted
+  operations with a per-call exit proof. Only a raw `ESRCH` registration error consults it,
+  after the one Close call; a proved exit returns the exit and done channels already closed
+  and an open failure channel with no goroutine. A refused proof, no proof, any other
+  registration error (including `EINTR`, `EPERM` and a wrapped `ESRCH`) and creation errors
+  return the original error and nil channels. A successful registration never consults the
+  proof and keeps the ordering above. `TestExitProofSequence`
+  (`exitwait_darwin_arm64_test.go`) checks the bounded non-reaping `waitid` loop against
+  hand-written call/sleep logs with a per-call fake clock and sleeper: no state then exit,
+  the five-call bound, no state then stopped, every non-terminal code, other PID or
+  signal, errors including `EINTR`, deadline edges (a terminal result exactly at 10 ms is
+  accepted, 1 ns later refused, no call at the deadline, sleeps clamped to the budget,
+  late sleeps), invalid PIDs and a zeroed buffer before every call. `TestExitProofConstants`
+  pins the kernel values and the 104-byte `siginfo_t` layout, also checked at compile time.
+  Real direct children, reaped only through their own handles: `TestExitProofKernelExited`
+  waits without reaping until the child has exited, then requires registration `ESRCH`,
+  the fallback shape from both the per-call path and `watchExit`, and a later normal
+  `Wait` with exit 0; `TestExitProofKernelStopped` stops the child through its handle,
+  waits until the kernel reports it stopped and requires the proof to refuse;
+  `TestExitProofKernelLive` requires a running child to be refused without blocking.
 - `internal/cli` (`execute_test.go`): frozen global and execute help bytes, syntax errors and
   restoration of the caller's signal handling after execute returns.
 
