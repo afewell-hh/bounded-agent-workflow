@@ -219,12 +219,13 @@ entry is `unsafe_execution_layout`. Larger projects or files are unsupported.
 
 The Git control capture records the symbolic and resolved HEAD, the staged index listing,
 each index entry's flags, the Git directories and, by metadata and content hash, the
-top-level `.git` entry, `HEAD`, `config.worktree`, `commondir` and `gitdir` of the
-worktree's Git directory, its `info/` and `refs/` trees, and the common directory's `config`, `packed-refs`,
+top-level `.git` entry, `HEAD`, `index`, `shallow`, `config.worktree`, `commondir` and `gitdir` of the
+worktree's Git directory, its `info/` and `refs/` trees, and the common directory's `config`, `packed-refs`, `shallow`,
 `objects/info/alternates`, `objects/info/http-alternates`, `info/`, `hooks/` and `refs/` trees
-(at most 512 entries). Linked worktrees are supported. The raw index file is not
-compared, because a read-only Git refresh may rewrite its stat cache; its staged listing
-and flags are. The capture is private and never published. Redirected control files or directories
+(at most 512 entries). Linked worktrees are supported. When present, the index must be a regular file owned by the operator
+or root, without group/other write or special permission bits. Its identity and raw
+bytes are compared alongside its staged listing and flags: guarded Git commands use
+`--no-optional-locks`, so they do not refresh the index on disk. The capture is private and never published. Redirected control files or directories
 (symlinks) and local Git `include`/`includeIf` configuration are unsupported; the command
 does not resolve those additional configuration sources.
 

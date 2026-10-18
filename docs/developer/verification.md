@@ -43,7 +43,9 @@ routing/syntax test:
   binary as a fake pinned executable) proving stdin, argv and environment through the
   production runner. Further cases: edits hidden by assume-unchanged or skip-worktree
   flags (pre-existing flags reject before start), a flag change alone, Git `config`,
-  `info/exclude` and hook changes, byte-identical replacement and mode drift of an
+  `info/exclude`, hook and shallow-history changes, index redirection, unsafe index
+  permissions, format changes and byte-identical index replacement (guarded read-only
+  Git leaves the index unchanged), byte-identical replacement and mode drift of an
   instruction and of another tracked file, new empty directories and links, a linked
   worktree (completes; a common `config` change does not); capture bounds at exactly
   4,096/4,097 entries, 1 MiB/1 MiB + 1 per file (directly, as a tracked file and as an
@@ -58,7 +60,10 @@ routing/syntax test:
   deadline to 1.5 s), cancellation while running, and the unchanged 8 MiB stdout cap,
   10,000-event limit and 512 KiB event bound; each records `worker_unusable` and is never
   replayed. The fixtures need every ancestor of `TMPDIR` to be a safe directory (owned by
-  the user or root, not group/other writable, no special bits).
+  the user or root, not group/other writable, no special bits), and the complete
+  enumerated source/base path set must fit the same 256-path bound as a real run.
+  Deep temporary-directory layouts can exceed that bound; use a registered shallow
+  private fixture root without changing the production limit.
 
 These are offline fixtures. They do not establish native Claude authentication, loading
 behaviour or any live result; the single live integration attempt is recorded on the

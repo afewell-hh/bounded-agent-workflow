@@ -255,13 +255,13 @@ func unchangedExcept(before, after snapshot, allowed map[string]bool) bool {
 }
 
 // Control entries relative to the per-worktree Git directory and the common
-// directory. Trees are walked within the control bounds. The index file's raw
-// bytes are not compared (a read-only Git refresh may rewrite its stat cache);
-// its staged listing and per-entry flags are compared instead.
+// directory. Trees are walked within the control bounds. Guarded Git commands
+// use --no-optional-locks, so the index's identity and bytes remain immutable;
+// its staged listing and per-entry flags are also compared.
 var (
-	gitDirFiles = []string{"HEAD", "config.worktree", "commondir", "gitdir"}
+	gitDirFiles = []string{"HEAD", "index", "shallow", "config.worktree", "commondir", "gitdir"}
 	gitDirTrees = []string{"info", "refs"}
-	commonFiles = []string{"packed-refs", "config", "objects/info/alternates", "objects/info/http-alternates"}
+	commonFiles = []string{"packed-refs", "shallow", "config", "objects/info/alternates", "objects/info/http-alternates"}
 	commonTrees = []string{"info", "hooks", "refs"}
 )
 
@@ -290,6 +290,11 @@ func controlFiles(top, gitDir, common string) ([]byte, error) {
 			return nil
 		}
 		if err != nil {
+			return errCapture
+		}
+		if key == "gitdir:index" && (id.kind != 'F' ||
+			(id.uid != uint32(os.Getuid()) && id.uid != 0) ||
+			id.mode.Perm()&0o022 != 0 || id.mode&(fs.ModeSetuid|fs.ModeSetgid|fs.ModeSticky) != 0) {
 			return errCapture
 		}
 		if key == "top:.git" {
