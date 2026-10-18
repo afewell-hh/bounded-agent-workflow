@@ -5,9 +5,41 @@
 foundation, the read-only [`baw context`](../operator/context.md) role reference list and
 the [`baw run execute`](../operator/execution.md) local worker/verifier primitive and the
 [`baw run review`](../operator/review.md) reviewer-program primitive and the
-[`baw run verify`](../operator/verification.md) verifier-program primitive are implemented. Packaging checks are not execution tests. The earlier Python prototype's
+[`baw run verify`](../operator/verification.md) verifier-program primitive and the
+[`baw run worker`](../operator/worker.md) native Claude worker operation are implemented. Packaging checks are not execution tests. The earlier Python prototype's
 test count is not evidence that a new Go implementation behaves correctly. Everything
 below those slices remains a future requirement.
+
+## Implemented slice tests: `baw run worker`
+
+The worker slice keeps the retained source gates unchanged (the selected full suite, the
+`internal/cli` and focused timing ceilings, the binary journeys, the 76 legacy comparisons
+and the SHA-256 journey supplement). Its tests live outside `internal/cli`, except one
+routing/syntax test:
+
+- `internal/proc`: `RunObservedInput` supplies a regular-file packet as stdin from the
+  caller's offset, refuses a non-regular packet before start, gives the observer exactly
+  the accepted stdout bytes serially, never dispatches bytes over the cap, cancels through
+  the existing cleanup on an observer error and never calls the observer again or after
+  return. `Run` and `RunObserved` still use `/dev/null`.
+- `internal/agents/claude`: the Go classification table equals the version-bound fixture
+  in `testdata`; strict profile parsing with a hand-written canonical hash; the exact
+  argv and environment; positive and named-stop negative stream cases (init mismatch,
+  hooks, auth, retry, refusal, background tasks, tool and correlation errors, unsolicited
+  input, report binding, truthful noncompletion, size and event caps, missing newline);
+  complete source-matrix enumeration against a hand-written set, deduplication and bound,
+  per-row present/absent/unsafe/unavailable cases and before/after comparison.
+- `internal/worker`: real Git fixtures (SHA-1 and SHA-256) with per-call seams, no global
+  hooks: exact packet bytes and order, argv/env and private artifacts; rejections before
+  start with zero starts and no attempt; allowed versus extra, ignored, index, commit,
+  symlink, instruction and source changes; stream and process failures; acquired faults,
+  pre-start change, no replay; receipt validation; and one real child (the copied test
+  binary as a fake pinned executable) proving stdin, argv and environment through the
+  production runner.
+
+These are offline fixtures. They do not establish native Claude authentication, loading
+behaviour or any live result; the single live integration attempt is recorded on the
+implementation ticket, not here.
 
 ## Implemented slice gates: `baw inspect`
 

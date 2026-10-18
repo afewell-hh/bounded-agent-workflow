@@ -21,7 +21,9 @@ evaluation or recovery), and [`baw run review`](docs/operator/review.md), which 
 reviewer program's verdict on a clean committed candidate (not an approval, findings record or
 verification of that candidate), and [`baw run verify`](docs/operator/verification.md), which records one
 trusted local verifier program's observation on a clean committed candidate (not complete gate evidence,
-a source freeze or approval). There is no
+a source freeze or approval), and [`baw run worker`](docs/operator/worker.md), which runs one approved
+native Claude Code worker with the full frozen project instructions and records its observed change
+(not tests, review, acceptance or authority). There is no
 controller, release, installed plugin or configured application. Other `baw` command
 examples remain proposed interfaces, not available commands.
 
@@ -87,6 +89,7 @@ Do not overlay this tooling seed or silently replace a project's governing polic
 | Run one trusted local worker and verifier attempt | [`baw run execute`](docs/operator/execution.md) |
 | Record one reviewer-program verdict for a committed candidate | [`baw run review`](docs/operator/review.md) |
 | Record one verifier-program observation for a committed candidate | [`baw run verify`](docs/operator/verification.md) |
+| Run one native Claude worker attempt with frozen instructions | [`baw run worker`](docs/operator/worker.md) |
 | Prepare BAW's native Go development environment | [Developer setup](docs/developer/environment.md) — toolchain, build and test route |
 | Supply app/API secrets and control external writes | [Secrets and access](docs/developer/secrets-and-access.md) |
 | Complete routine tickets without per-merge human approvals | [GitHub single-account procedure](docs/operator/github-single-account.md) |

@@ -44,6 +44,16 @@ is an observation, not approval or verification of the candidate.
 recorded verifier-program attempt in its own `verify-v1` namespace, needing only a run record,
 reusing the unchanged execute plan command and executable checks and inspecting the candidate
 with `internal/inspect` before and after; it is not complete gate evidence, a source freeze or approval.
+`internal/agents/claude` holds the single Claude Code 2.1.285 worker profile: the strict profile
+manifest and canonical hash, the frozen argv/environment template, the
+`claude-2.1.285-source-v1` metadata source matrix and the bounded stream-json parser built from the
+frozen event classification table. `internal/worker` implements
+[`baw run worker`](../operator/worker.md): one recorded native worker attempt in its own `worker-v1`
+namespace with the full ordered instructions on stdin, pre-start rechecks, guarded Git change
+capture and strict receipts. It uses `proc.RunObservedInput`, a narrow additive `internal/proc`
+entry point that adds a regular-file stdin and a bounded stdout observer to the same supervision;
+`Run` and `RunObserved` keep `/dev/null` stdin. A completed worker observation is not tests,
+review, acceptance or authority; there is no native Codex adapter.
 
 Do not create all empty packages before they are needed. Begin with the smallest tested
 read-only slice. Interface/state choices require an approved specification before

@@ -10,8 +10,11 @@ to this tooling repository. The module `github.com/afewell-hh/bounded-agent-work
 [`baw run execute`](../operator/execution.md) local worker/verifier primitive and the
 [`baw run review`](../operator/review.md) reviewer-program primitive and the
 [`baw run verify`](../operator/verification.md) verifier-program primitive (all exercised only
-with compiled fake programs; no native agent adapter) and their tests. See the last section for
-which checks have actually run and what remains unvalidated.
+with compiled fake programs; no native agent adapter), the
+[`baw run worker`](../operator/worker.md) native Claude worker operation (its package tests use a
+copied test binary as a fake pinned executable and per-call runner seams with synthetic streams;
+no test calls a model, and none is evidence of native authentication) and their tests. See the
+last section for which checks have actually run and what remains unvalidated.
 
 ## Selected toolchain
 
