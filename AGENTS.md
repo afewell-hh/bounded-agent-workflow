@@ -6,8 +6,9 @@ which save, display and read-only count a local record of supplied references, a
 [`baw context`](docs/operator/context.md) role reference list, and
 [`baw run execute`](docs/operator/execution.md), one recorded trusted local worker and verifier attempt, and
 [`baw run review`](docs/operator/review.md), one recorded trusted reviewer-program verdict for a committed candidate, and
-[`baw run verify`](docs/operator/verification.md), one recorded trusted verifier-program observation for a committed candidate; they grant no authority and
-dispatch or recover nothing. Do not claim other `baw` surfaces exist, infer live test results, or implement the entire design in one assignment.
+[`baw run verify`](docs/operator/verification.md), one recorded trusted verifier-program observation for a committed candidate, and
+[`baw run worker`](docs/operator/worker.md), one recorded native Claude worker attempt with frozen instructions. The worker starts its named Claude attempt; these commands grant no authority
+and do not recover runs. Do not claim other `baw` surfaces exist, infer live test results, or implement the entire design in one assignment.
 
 Read [the common protocol](workflow/protocol.md), then only your assigned
 [role](workflow/roles/lead.md) (lead, worker, reviewer, or helper under that directory).

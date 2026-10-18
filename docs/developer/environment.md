@@ -10,8 +10,11 @@ to this tooling repository. The module `github.com/afewell-hh/bounded-agent-work
 [`baw run execute`](../operator/execution.md) local worker/verifier primitive and the
 [`baw run review`](../operator/review.md) reviewer-program primitive and the
 [`baw run verify`](../operator/verification.md) verifier-program primitive (all exercised only
-with compiled fake programs; no native agent adapter) and their tests. See the last section for
-which checks have actually run and what remains unvalidated.
+with compiled fake programs; no native agent adapter), the
+[`baw run worker`](../operator/worker.md) native Claude worker operation (its package tests use a
+copied test binary as a fake pinned executable and per-call runner seams with synthetic streams;
+no test calls a model, and none is evidence of native authentication) and their tests. See the
+last section for which checks have actually run and what remains unvalidated.
 
 ## Selected toolchain
 
@@ -259,6 +262,19 @@ Known limits:
   ordering. When `Run` returns without having received a watcher signal (for example a
   leader not seen to exit by the end of cleanup, which is then reaped in the background),
   the queue stays open until the watcher finishes, as before.
+- Registering the exit watch for a leader that has already exited but is not yet reaped
+  fails with `ESRCH` on this host ([retained kernel measurement](https://github.com/afewell-hh/bounded-agent-workflow/issues/38#issuecomment-6253988477);
+  the earlier watcher comment assumed the event would fire instead). Under concurrent synthetic Git calls this made
+  `Run` fail at setup. On that error only, after its one queue close, the watcher now
+  asks a non-reaping, nonblocking `waitid` about the same child: at most five calls,
+  1 ms apart, within 10 ms of the first. Only "no state yet" is retried; a terminal exit
+  of that child reports the leader exited, and anything else returns the original
+  `ESRCH`. `Run` still reaps the leader itself after group cleanup. The `waitid` call and
+  `siginfo_t` layout are pinned to darwin/arm64; on other platforms the fallback refuses.
+  A proof requires the matching child PID, `SIGCHLD` and a terminal exit/kill/core-dump
+  code. Stopped, trapped and continued states are refused: the selected Go source
+  (`os/wait_waitid.go`) records Darwin reporting stops even with `WEXITED`. The real
+  child regression validates this host, not future OS/ABI compatibility.
 
 Any unequal list fails the test. It is not filtered or retried.
 

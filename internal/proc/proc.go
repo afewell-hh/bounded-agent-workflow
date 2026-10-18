@@ -24,6 +24,8 @@
 //
 // RunObserved shares the same supervision and additionally reports the facts
 // it established (Observation); it adds no containment beyond the above.
+// RunObservedInput is RunObserved with an optional regular-file stdin and an
+// optional bounded stdout observer; Run and RunObserved keep /dev/null.
 package proc
 
 import (
@@ -111,18 +113,29 @@ var (
 // capture drains one pipe, keeping at most limit bytes. Bytes beyond the limit
 // are read and discarded so writers never block, and mark the stream exceeded.
 type capture struct {
-	mu       sync.Mutex
-	buf      []byte
-	keep     bool // stdout is kept; stderr is only counted, never stored
-	n        int
-	limit    int
-	exceeded bool
-	eof      bool // the reader ended on actual EOF, not a forced close or error
-	over     chan struct{}
-	done     chan struct{}
+	mu             sync.Mutex
+	buf            []byte
+	keep           bool // stdout is kept; stderr is only counted, never stored
+	n              int
+	limit          int
+	exceeded       bool
+	observerFailed bool // written by reader, read only after done
+	eof            bool // the reader ended on actual EOF, not a forced close or error
+	over           chan struct{}
+	done           chan struct{}
 }
 
 func newCapture(f *os.File, limit int, keep bool) *capture {
+	return newObservedCapture(f, limit, keep, nil, nil)
+}
+
+// newObservedCapture is newCapture that also hands each accepted chunk, as a
+// copy and outside the capture lock, to observe. A chunk is counted against
+// the cap before it is dispatched; a chunk over the cap is never dispatched.
+// After observe returns an error it is never called again and stop is called
+// once. Only the reader goroutine calls observe, so it is never running after
+// done is closed.
+func newObservedCapture(f *os.File, limit int, keep bool, observe func([]byte) error, stop func()) *capture {
 	c := &capture{limit: limit, keep: keep, over: make(chan struct{}), done: make(chan struct{})}
 	var r io.Reader = f
 	if pipeReader != nil {
@@ -134,7 +147,13 @@ func newCapture(f *os.File, limit int, keep bool) *capture {
 		for {
 			n, err := r.Read(b)
 			if n > 0 {
-				c.add(b[:n])
+				if c.add(b[:n]) && observe != nil {
+					if observe(append([]byte(nil), b[:n]...)) != nil {
+						observe = nil
+						c.observerFailed = true
+						stop()
+					}
+				}
 			}
 			if err != nil {
 				if err == io.EOF {
@@ -149,22 +168,24 @@ func newCapture(f *os.File, limit int, keep bool) *capture {
 	return c
 }
 
-func (c *capture) add(p []byte) {
+// add counts p and reports whether it was accepted within the cap.
+func (c *capture) add(p []byte) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.exceeded {
-		return
+		return false
 	}
 	if c.n+len(p) > c.limit {
 		c.exceeded = true
 		c.buf = nil
 		close(c.over)
-		return
+		return false
 	}
 	c.n += len(p)
 	if c.keep {
 		c.buf = append(c.buf, p...)
 	}
+	return true
 }
 
 func (c *capture) result() ([]byte, bool, bool) {
@@ -212,7 +233,7 @@ func closeAll(fs ...*os.File) {
 // Run executes spec under ctx and returns captured stdout. Stderr is counted
 // against its cap and never stored or returned.
 func Run(ctx context.Context, spec Spec) ([]byte, error) {
-	out, _, err := run(ctx, spec, false)
+	out, _, err := run(ctx, spec, false, nil)
 	return out, err
 }
 
@@ -222,10 +243,39 @@ func Run(ctx context.Context, spec Spec) ([]byte, error) {
 // the timeout. Its error value follows Run; use the Observation for
 // classification.
 func RunObserved(ctx context.Context, spec Spec) ([]byte, Observation, error) {
-	return run(ctx, spec, true)
+	return run(ctx, spec, true, nil)
 }
 
-func run(ctx context.Context, spec Spec, observe bool) ([]byte, Observation, error) {
+// input holds the optional per-call inputs of RunObservedInput.
+type input struct {
+	stdin   *os.File
+	observe func([]byte) error
+	stop    func()
+}
+
+// RunObservedInput is RunObserved with two optional per-call inputs. A
+// non-nil packet must be an open regular file; it becomes the child's stdin
+// from its current offset (no feeder pipe or goroutine) and the caller keeps
+// and closes its own handle after return. A nil packet keeps /dev/null. A
+// non-nil stdoutObserver receives copies of accepted stdout chunks in order,
+// outside capture locks, from the stdout reader only; it must not block. Its
+// first error cancels this invocation's context, so the existing cleanup
+// applies (Cancelled is set even if exit wins the initial select),
+// and it is never called again or after return. Captures, caps, group
+// ownership and the Observation are those of RunObserved.
+func RunObservedInput(ctx context.Context, spec Spec, packet *os.File, stdoutObserver func([]byte) error) ([]byte, Observation, error) {
+	if packet != nil {
+		fi, err := packet.Stat()
+		if err != nil || !fi.Mode().IsRegular() {
+			return nil, Observation{}, ErrStart
+		}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	return run(ctx, spec, true, &input{stdin: packet, observe: stdoutObserver, stop: cancel})
+}
+
+func run(ctx context.Context, spec Spec, observe bool, in *input) ([]byte, Observation, error) {
 	var obs Observation
 	if observe && ctx.Err() != nil {
 		obs.Cancelled = true
@@ -242,6 +292,9 @@ func run(ctx context.Context, spec Spec, observe bool) ([]byte, Observation, err
 	}
 	cmd := &exec.Cmd{Path: spec.Path, Args: append([]string{spec.Path}, spec.Args...), Env: spec.Env,
 		Dir: spec.Dir, Stdout: outW, Stderr: errW, SysProcAttr: &syscall.SysProcAttr{Setpgid: true}}
+	if in != nil && in.stdin != nil {
+		cmd.Stdin = in.stdin // an *os.File is passed directly as fd 0
+	}
 	if err := cmd.Start(); err != nil {
 		closeAll(outR, outW, errR, errW)
 		return nil, obs, ErrStart
@@ -269,7 +322,12 @@ func run(ctx context.Context, spec Spec, observe bool) ([]byte, Observation, err
 	case watchRuntimeFault != nil:
 		watchFailed = watchRuntimeFault()
 	}
-	stdout := newCapture(outR, spec.StdoutCap, true)
+	var stdout *capture
+	if in != nil && in.observe != nil {
+		stdout = newObservedCapture(outR, spec.StdoutCap, true, in.observe, in.stop)
+	} else {
+		stdout = newCapture(outR, spec.StdoutCap, true)
+	}
 	stderr := newCapture(errR, spec.StderrCap, false)
 
 	timer := time.NewTimer(spec.Timeout)
@@ -342,6 +400,14 @@ func run(ctx context.Context, spec Spec, observe bool) ([]byte, Observation, err
 		go cmd.Wait()
 	}
 
+	// The leader may have exited before the callback cancels the context.
+	// An observer rejection still independently disqualifies completion.
+	if stdout.observerFailed {
+		obs.Cancelled = true
+		if failure == nil {
+			failure = ErrTimeout
+		}
+	}
 	out, outOver, outEOF := stdout.result()
 	_, errOver, errEOF := stderr.result()
 	obs.OutputLimit = outOver || errOver

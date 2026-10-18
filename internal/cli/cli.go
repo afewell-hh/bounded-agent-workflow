@@ -151,6 +151,9 @@ func run(args []string, stdout, stderr io.Writer, limits *inspect.Limits) int {
 	if isVerify(args) {
 		return runVerify(args, stdout, stderr)
 	}
+	if isWorker(args) {
+		return runWorker(args, stdout, stderr)
+	}
 	if len(args) > 0 && (args[0] == "run" || args[0] == "status") {
 		return runRecord(args, stdout, stderr, limits)
 	}

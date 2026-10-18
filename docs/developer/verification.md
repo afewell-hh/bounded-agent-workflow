@@ -5,9 +5,69 @@
 foundation, the read-only [`baw context`](../operator/context.md) role reference list and
 the [`baw run execute`](../operator/execution.md) local worker/verifier primitive and the
 [`baw run review`](../operator/review.md) reviewer-program primitive and the
-[`baw run verify`](../operator/verification.md) verifier-program primitive are implemented. Packaging checks are not execution tests. The earlier Python prototype's
+[`baw run verify`](../operator/verification.md) verifier-program primitive and the
+[`baw run worker`](../operator/worker.md) native Claude worker operation are implemented. Packaging checks are not execution tests. The earlier Python prototype's
 test count is not evidence that a new Go implementation behaves correctly. Everything
 below those slices remains a future requirement.
+
+## Implemented slice tests: `baw run worker`
+
+The worker slice keeps the retained source gates unchanged (the selected full suite, the
+`internal/cli` and focused timing ceilings, the binary journeys, the 76 legacy comparisons
+and the SHA-256 journey supplement). Its tests live outside `internal/cli`, except one
+routing/syntax test:
+
+- `internal/proc`: `RunObservedInput` supplies a regular-file packet as stdin from the
+  caller's offset, refuses a non-regular packet before start, gives the observer exactly
+  the accepted stdout bytes serially, never dispatches bytes over the cap, cancels through
+  the existing cleanup on an observer error and never calls the observer again or after
+  return. `Run` and `RunObserved` still use `/dev/null`.
+- `internal/agents/claude`: the Go classification table equals the version-bound fixture
+  in `testdata`; strict profile parsing with a hand-written canonical hash; the exact
+  argv and environment; positive and named-stop negative stream cases (init mismatch,
+  hooks, auth, retry, refusal, background tasks, tool and correlation errors, unsolicited
+  input, report binding, truthful noncompletion, size and event caps, missing newline);
+  complete source-matrix enumeration against a hand-written set, deduplication and bound;
+  `TestObserveEveryRowDisposition` runs every hand-written row (rows 1–3 for the worktree
+  and one nested directory, and every fixed row) absent, present, unsafe (group-writable),
+  wrong type and unavailable (an `EACCES` metadata seam) against a hand-written per-class
+  present disposition; rows for ancestors above the worktree are enumerated but are not
+  each created on disk. Base-directory safety (worktree, nested base, intermediate
+  directory and HOME made writable; setgid, sticky and foreign owner through a metadata
+  seam), hand-written base enumeration and before/after comparison of rows and bases.
+- `internal/worker`: real Git fixtures (SHA-1 and SHA-256) with per-call seams, no global
+  hooks: exact packet bytes and order, argv/env and private artifacts; rejections before
+  start with zero starts and no attempt; allowed versus extra, ignored, index, commit,
+  symlink, instruction and source changes; stream and process failures; acquired faults,
+  pre-start change, no replay; receipt validation; and one real child (the copied test
+  binary as a fake pinned executable) proving stdin, argv and environment through the
+  production runner. Further cases: edits hidden by assume-unchanged or skip-worktree
+  flags (pre-existing flags reject before start), a flag change alone, Git `config`,
+  `info/exclude`, hook and shallow-history changes, index redirection, unsafe index
+  permissions, format changes and byte-identical index replacement (guarded read-only
+  Git leaves the index unchanged), byte-identical replacement and mode drift of an
+  instruction and of another tracked file, new empty directories and links, a linked
+  worktree (completes; a common `config` change does not); capture bounds at exactly
+  4,096/4,097 entries, 1 MiB/1 MiB + 1 per file (directly, as a tracked file and as an
+  allowed edit) and 16 MiB/16 MiB + 1 in total; a nested `.git` and a submodule entry; the
+  instruction group (missing, hash and blob drift, tracked link, 65,537 bytes rejected,
+  exactly 65,536 delivered); the packet bound at exactly 262,144 bytes including framing
+  and one byte over, plus a composed over-bound packet; state root, namespace and attempt
+  mode drift after intent (zero starts, no result) and while running (no result, edits
+  kept, no replay); byte-identical and mode-changed plan/task/profile substitutes; unsafe
+  and changed worktree and nested bases. Real compiled fake children through the
+  production runner cover a prompt hang (the runner seam shortens only the 300 s
+  deadline to 1.5 s), cancellation while running, and the unchanged 8 MiB stdout cap,
+  10,000-event limit and 512 KiB event bound; each records `worker_unusable` and is never
+  replayed. The fixtures need every ancestor of `TMPDIR` to be a safe directory (owned by
+  the user or root, not group/other writable, no special bits), and the complete
+  enumerated source/base path set must fit the same 256-path bound as a real run.
+  Deep temporary-directory layouts can exceed that bound; use a registered shallow
+  private fixture root without changing the production limit.
+
+These are offline fixtures. They do not establish native Claude authentication, loading
+behaviour or any live result; the single live integration attempt is recorded on the
+implementation ticket, not here.
 
 ## Implemented slice gates: `baw inspect`
 
@@ -290,6 +350,27 @@ the result retained; real SIGINT and SIGTERM during the worker give the publishe
   again. Proposed gate:
   `go test ./internal/proc -run '^TestExitWatch' -count=5 -timeout=90s -v`, all three tests
   run and pass five times, package within 30 s.
+- `internal/proc` (#38 C1 setup fallback; these tests are new and are not results):
+  `TestExitFallbackSetup` (`exitwatch_fallback_darwin_test.go`) drives the same scripted
+  operations with a per-call exit proof. Only a raw `ESRCH` registration error consults it,
+  after the one Close call; a proved exit returns the exit and done channels already closed
+  and an open failure channel with no goroutine. A refused proof, no proof, any other
+  registration error (including `EINTR`, `EPERM` and a wrapped `ESRCH`) and creation errors
+  return the original error and nil channels. A successful registration never consults the
+  proof and keeps the ordering above. `TestExitProofSequence`
+  (`exitwait_darwin_arm64_test.go`) checks the bounded non-reaping `waitid` loop against
+  hand-written call/sleep logs with a per-call fake clock and sleeper: no state then exit,
+  the five-call bound, no state then stopped, every non-terminal code, other PID or
+  signal, errors including `EINTR`, deadline edges (a terminal result exactly at 10 ms is
+  accepted, 1 ns later refused, no call at the deadline, sleeps clamped to the budget,
+  late sleeps), invalid PIDs and a zeroed buffer before every call. `TestExitProofConstants`
+  pins the kernel values and the 104-byte `siginfo_t` layout, also checked at compile time.
+  Real direct children, reaped only through their own handles: `TestExitProofKernelExited`
+  waits without reaping until the child has exited, then requires registration `ESRCH`,
+  the fallback shape from both the per-call path and `watchExit`, and a later normal
+  `Wait` with exit 0; `TestExitProofKernelStopped` stops the child through its handle,
+  waits until the kernel reports it stopped and requires the proof to refuse;
+  `TestExitProofKernelLive` requires a running child to be refused without blocking.
 - `internal/cli` (`execute_test.go`): frozen global and execute help bytes, syntax errors and
   restoration of the caller's signal handling after execute returns.
 
