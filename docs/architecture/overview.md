@@ -49,8 +49,9 @@ manifest and canonical hash, the frozen argv/environment template, the
 `claude-2.1.285-source-v1` metadata source matrix and the bounded stream-json parser built from the
 frozen event classification table. `internal/worker` implements
 [`baw run worker`](../operator/worker.md): one recorded native worker attempt in its own `worker-v1`
-namespace with the full ordered instructions on stdin, pre-start rechecks, guarded Git change
-capture and strict receipts. It uses `proc.RunObservedInput`, a narrow additive `internal/proc`
+namespace with the full ordered instructions on stdin, pre-start rechecks of state, input,
+source and base-directory identities, a bounded full filesystem capture of the worktree compared
+with the launch commit and after return, a Git control identity capture and strict receipts. It uses `proc.RunObservedInput`, a narrow additive `internal/proc`
 entry point that adds a regular-file stdin and a bounded stdout observer to the same supervision;
 `Run` and `RunObserved` keep `/dev/null` stdin. A completed worker observation is not tests,
 review, acceptance or authority; there is no native Codex adapter.

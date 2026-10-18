@@ -117,7 +117,9 @@ run ID is 32 lowercase hex characters.
   absolute, `.`/`..`, empty or `.git` component, no instruction path, no `.claude`
   component, and not `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `.mcp.json`,
   `.gitignore`, `.gitattributes` or `.gitmodules`. Parent directories must already exist
-  as real directories; the file itself may be absent or a regular file.
+  as real directories; the file itself may be absent or a regular file. Workspace names
+  containing permission-pattern characters (`*?[]{}\()`), invalid UTF-8 or control characters
+  are unsupported (`unsafe_execution_layout`), keeping the native rules literal.
 - **Profile.** Exact keys above. `approved_profile_sha256` is the SHA-256 of the canonical
   encoding of every other member (members sorted by name, no insignificant whitespace,
   no HTML escaping, number literals unchanged). Plugin tuples compare by that canonical
@@ -131,16 +133,26 @@ run ID is 32 lowercase hex characters.
 Syntax → platform → state root and `worker-v1` namespace → plan, task and profile files →
 run record → guarded inspection (HEAD, object format, clean counts) → task against the
 record → layout (worktree disjoint from the state root, private files and auth HOME) →
-ignored files → instructions → allowed paths → packet assembly → executable pin and HOME
-→ source matrix → existing attempt → exclusive acquisition. Every failure before
-acquisition changes no state and starts nothing.
+ignored files → index flags (any assume-unchanged or skip-worktree entry is
+`worker_not_clean`) → Git control capture → full worktree capture, which must equal the
+launch commit exactly (below) → instructions → allowed paths → packet assembly →
+executable pin and HOME → source matrix and base directories → existing attempt →
+exclusive acquisition. Every failure before acquisition changes no state and starts
+nothing.
 
 After acquisition the attempt publishes `supplied-inputs.json`, `packet.txt`,
-`source-manifest.json` and `intent.json` (all `0600`). Immediately before start it rereads
-the plan, task and profile bytes and repeats the instruction, pin, worktree identity, Git
-control (symbolic HEAD, HEAD, staged index listing), source matrix and clean-status
+`source-manifest.json` and `intent.json` (all `0600`). Immediately before start it checks
+that the state root, `records-v1`/`worker-v1` namespaces, attempt directory and
+its `worker`/`worker/tmp` directories are still the same
+(device and inode) private `0700` directories you own; if not, nothing more is published,
+nothing starts and the command fails with `worker_uncertain`. It then rereads the plan,
+task, profile and saved record files, requiring the same file (device and inode), mode and bytes, so a
+byte-identical substitute counts as a change, and repeats the instruction, pin, worktree
+identity, Git control, source matrix, base directory, clean-status and full worktree
 observations. A change publishes a `not_started` `worker_unusable` result, delivers it and
-then fails with `input_changed`.
+then fails with `input_changed`. The state directories are checked again before the result
+is published; a change there leaves the attempt blocked without a result and fails with
+`worker_uncertain`. Edits are never rolled back and the attempt is never reused.
 
 ### Packet
 
@@ -194,16 +206,40 @@ must end with a newline.
 
 ### Change capture
 
-After a usable exit 0 with a verified stream, the attempt rereads every input and repeats
-the pin, instruction, source-matrix, HEAD and Git control observations, then runs guarded
-`git status` including ignored files. Every difference must be a worktree-only change to
-an allowed path (no index change, conflict, rename, directory or ignored extra). Each
-allowed path is read without following links and hashed: at most 4,096 status entries,
-1 MiB per file and 16 MiB in total, with no truncation. The private `changes.json` lists
-each allowed path as `unchanged`, `modified`, `added`, `deleted` or `absent`, with mode, size
-and content hash when present; the result
-binds its SHA-256. Git index or HEAD movement, an instruction or control edit, or any
-extra path makes the attempt `worker_unusable`. Edits are never rolled back.
+The full worktree capture enumerates the actual filesystem below the worktree, not Git
+status: every directory, regular file and symbolic link, including ignored and untracked
+entries, except the top-level `.git` entry. Each is observed without following links (type,
+mode, owner, device and inode; a file's bytes or a link's target are hashed; a directory
+records no size or time). Bounds: at most 4,096 entries (files, directories and links),
+1 MiB per file and 16 MiB hashed in total; an overflow, a nested `.git` name, a special
+file or unreadable entry fails (`unsafe_execution_layout` at launch) with no truncation.
+At launch every tracked path must be present with its committed blob ID, type and
+executable bit, and no other file or link may exist (`worker_not_clean`); a submodule
+entry is `unsafe_execution_layout`. Larger projects or files are unsupported.
+
+The Git control capture records the symbolic and resolved HEAD, the staged index listing,
+each index entry's flags, the Git directories and, by metadata and content hash, the
+top-level `.git` entry, `HEAD`, `config.worktree`, `commondir` and `gitdir` of the
+worktree's Git directory, its `info/` and `refs/` trees, and the common directory's `config`, `packed-refs`,
+`objects/info/alternates`, `objects/info/http-alternates`, `info/`, `hooks/` and `refs/` trees
+(at most 512 entries). Linked worktrees are supported. The raw index file is not
+compared, because a read-only Git refresh may rewrite its stat cache; its staged listing
+and flags are. The capture is private and never published. Redirected control files or directories
+(symlinks) and local Git `include`/`includeIf` configuration are unsupported; the command
+does not resolve those additional configuration sources.
+
+After a usable exit 0 with a verified stream, the attempt rereads every input (same file,
+mode and bytes) and repeats the pin, instruction, source-matrix, base directory, HEAD and
+Git control observations, then takes the full worktree capture again. Every path outside
+`allowed_changes` must be identical to the launch capture (presence, type, mode, owner,
+device, inode and content), so an edit hidden from Git status, for example behind an
+index flag, and a byte-identical replacement or mode change of an instruction or other
+file are differences. Guarded `git status` including ignored files must also show only
+worktree changes to allowed paths. An allowed path must afterwards be absent or a regular
+file within the same bounds. The private `changes.json` lists each allowed path as
+`unchanged`, `modified`, `added`, `deleted` or `absent`, with mode, size and content hash
+when present; the result binds its SHA-256. Any other difference, a Git control change or
+an overflow makes the attempt `worker_unusable`. Edits are never rolled back.
 
 ### Source matrix
 
@@ -213,12 +249,19 @@ every ancestor and each nested directory holding a tracked instruction or `.clau
 source; the user `~/.claude` instruction/config paths; the alternate `~/.config/claude`
 paths; the fresh project auto-memory directory; the native state containers
 (`~/.claude`, `~/.claude/projects`, `~/.claude.json`); and the admin-managed root
-`/Library/Application Support/ClaudeCode`. At most 256 paths. A symlink, wrong type or
+`/Library/Application Support/ClaudeCode`. At most 256 distinct paths including base directories. Overlapping user/ancestor rows
+retain the stricter user-owner rule; required-absent rows remain required absent. A symlink, wrong type or
 owner, group/other-writable or special-bit source, unreadable metadata, any alternate or
 admin-managed source, or an existing project memory directory fails with
-`source_profile_unavailable`. Present safe user sources are recorded, not read. Before
-start and after return the rows are compared by presence, type, owner and mode (never
-modification time); the native state row may change.
+`source_profile_unavailable`. Present safe user sources are recorded, not read. The base
+directories the rows hang from (the worktree and every ancestor, each nested directory
+with every directory between it and the worktree, and the auth HOME; the admin root or,
+when absent, its parent) must themselves be real directories owned by you or root, not
+group/other writable and without setuid, setgid or sticky bits. No host path is exempt,
+so a worktree under a world-writable sticky directory such as `/tmp` is unsupported.
+Before start and after return the rows are compared by presence, type, owner and mode, and
+the base directories by owner, mode, device and inode (never modification time); the
+native state row may change. `source-manifest.json` records both lists.
 
 This is complete coverage of a finite matrix plus documented suppression (`--safe-mode`,
 empty `--setting-sources`, strict empty MCP, disabled slash commands) and exposed native
@@ -269,6 +312,9 @@ codes.
   detected.
 - `GroupAbsent` means no signalable owned-group member remained before reaping, not that
   every descendant is gone; escaped descendants are not signalled.
-- Large repositories (over 4,096 status entries) and large allowed files are unsupported.
+- Large worktrees (over 4,096 entries, or over 16 MiB of file content) and files over
+  1 MiB are unsupported. Git objects and reflogs are outside the fixed control capture; this is not a
+  complete Git database integrity audit. Included configuration is rejected, and captured
+  refs/packed refs must remain unchanged.
 - Package tests use fake executables and synthetic streams. They are not evidence of
   native authentication or native behaviour.

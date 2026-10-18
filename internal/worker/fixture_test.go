@@ -62,6 +62,13 @@ type fx struct {
 
 func newFx(t *testing.T, format string) *fx {
 	t.Helper()
+	return newFxWith(t, format, nil, nil)
+}
+
+// newFxWith is newFx with extra files and symbolic links (path -> target)
+// committed in the launch-base tree.
+func newFxWith(t *testing.T, format string, extra, links map[string]string) *fx {
+	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -81,8 +88,14 @@ func newFx(t *testing.T, format string) *fx {
 		"workflow/protocol.md": "Protocol body.\n",
 		"target.txt":           "base\n",
 	}
+	for p, c := range extra {
+		files[p] = c
+	}
 	for p, c := range files {
 		f.ok(testfixture.Write(filepath.Join(f.repo, p), c))
+	}
+	for p, target := range links {
+		f.ok(os.Symlink(target, filepath.Join(f.repo, p)))
 	}
 	_, err = testfixture.Git(f.gitHome, f.repo, "add", "-A")
 	f.ok(err)

@@ -27,15 +27,38 @@ routing/syntax test:
   argv and environment; positive and named-stop negative stream cases (init mismatch,
   hooks, auth, retry, refusal, background tasks, tool and correlation errors, unsolicited
   input, report binding, truthful noncompletion, size and event caps, missing newline);
-  complete source-matrix enumeration against a hand-written set, deduplication and bound,
-  per-row present/absent/unsafe/unavailable cases and before/after comparison.
+  complete source-matrix enumeration against a hand-written set, deduplication and bound;
+  `TestObserveEveryRowDisposition` runs every hand-written row (rows 1–3 for the worktree
+  and one nested directory, and every fixed row) absent, present, unsafe (group-writable),
+  wrong type and unavailable (an `EACCES` metadata seam) against a hand-written per-class
+  present disposition; rows for ancestors above the worktree are enumerated but are not
+  each created on disk. Base-directory safety (worktree, nested base, intermediate
+  directory and HOME made writable; setgid, sticky and foreign owner through a metadata
+  seam), hand-written base enumeration and before/after comparison of rows and bases.
 - `internal/worker`: real Git fixtures (SHA-1 and SHA-256) with per-call seams, no global
   hooks: exact packet bytes and order, argv/env and private artifacts; rejections before
   start with zero starts and no attempt; allowed versus extra, ignored, index, commit,
   symlink, instruction and source changes; stream and process failures; acquired faults,
   pre-start change, no replay; receipt validation; and one real child (the copied test
   binary as a fake pinned executable) proving stdin, argv and environment through the
-  production runner.
+  production runner. Further cases: edits hidden by assume-unchanged or skip-worktree
+  flags (pre-existing flags reject before start), a flag change alone, Git `config`,
+  `info/exclude` and hook changes, byte-identical replacement and mode drift of an
+  instruction and of another tracked file, new empty directories and links, a linked
+  worktree (completes; a common `config` change does not); capture bounds at exactly
+  4,096/4,097 entries, 1 MiB/1 MiB + 1 per file (directly, as a tracked file and as an
+  allowed edit) and 16 MiB/16 MiB + 1 in total; a nested `.git` and a submodule entry; the
+  instruction group (missing, hash and blob drift, tracked link, 65,537 bytes rejected,
+  exactly 65,536 delivered); the packet bound at exactly 262,144 bytes including framing
+  and one byte over, plus a composed over-bound packet; state root, namespace and attempt
+  mode drift after intent (zero starts, no result) and while running (no result, edits
+  kept, no replay); byte-identical and mode-changed plan/task/profile substitutes; unsafe
+  and changed worktree and nested bases. Real compiled fake children through the
+  production runner cover a prompt hang (the runner seam shortens only the 300 s
+  deadline to 1.5 s), cancellation while running, and the unchanged 8 MiB stdout cap,
+  10,000-event limit and 512 KiB event bound; each records `worker_unusable` and is never
+  replayed. The fixtures need every ancestor of `TMPDIR` to be a safe directory (owned by
+  the user or root, not group/other writable, no special bits).
 
 These are offline fixtures. They do not establish native Claude authentication, loading
 behaviour or any live result; the single live integration attempt is recorded on the

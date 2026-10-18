@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -128,23 +129,37 @@ func Run(ctx context.Context, req Request, stdout io.Writer) (completed bool, er
 	return RunWith(ctx, req, stdout, Deps{})
 }
 
-// inputs is everything validated before acquisition.
+// inputs is everything validated before acquisition, plus the private state
+// identities retained after acquisition.
 type inputs struct {
 	rootP          string
 	ns             string
 	attempt        string
+	rootInfo       os.FileInfo
+	nsInfo         os.FileInfo
+	attemptInfo    os.FileInfo
+	workerInfo     os.FileInfo
+	tmpInfo        os.FileInfo
+	recordsInfo    os.FileInfo
+	recordPath     string
+	recordInfo     os.FileInfo
+	recordSHA      string
 	top            string
 	topInfo        os.FileInfo
 	rec            state.Record
 	planPath       string
 	taskPath       string
 	profilePath    string
+	planInfo       os.FileInfo
+	taskInfo       os.FileInfo
+	profileInfo    os.FileInfo
 	planSHA        string
 	taskSHA        string
 	profileFileSHA string
 	profile        claude.Profile
 	task           Task
 	tree           map[string]treeEntry
+	snap           snapshot
 	width          int
 	bodies         [][]byte
 	nested         []string
@@ -153,6 +168,8 @@ type inputs struct {
 	exeSHA         string
 	sources        []claude.SourcePath
 	observed       []claude.SourceEntry
+	bases          []string
+	baseObs        []claude.SourceEntry
 	control        []byte
 	g              *git
 }
@@ -163,8 +180,10 @@ type inputs struct {
 // output. completed is true only for a delivered worker_completed_unverified
 // result; a nil error with completed false is a delivered other outcome.
 // A pre-start input change after intent publishes and delivers a not_started
-// result and then returns input_changed. Errors from the state and inspect
-// packages are returned unchanged.
+// result and then returns input_changed. If the state root, namespace or
+// attempt directory is no longer the retained private directory before start
+// or before publication, nothing more is published and worker_uncertain is
+// returned. Errors from the state and inspect packages are returned unchanged.
 func RunWith(ctx context.Context, req Request, stdout io.Writer, d Deps) (completed bool, err error) {
 	d.fill()
 	in, err := validate(ctx, req, d)
@@ -176,12 +195,26 @@ func RunWith(ctx context.Context, req Request, stdout io.Writer, d Deps) (comple
 	if err := st.acquire(in.rootP, in.ns, in.attempt, cancelled); err != nil {
 		return false, err
 	}
+	// Retain the namespace and attempt identities; the root's was retained
+	// during validation. From here on every failure is uncertain.
+	if in.nsInfo, err = checkPrivateDir(in.ns); err != nil {
+		return false, fail(CodeUncertain)
+	}
+	if in.attemptInfo, err = checkPrivateDir(in.attempt); err != nil {
+		return false, fail(CodeUncertain)
+	}
+	if in.workerInfo, err = checkPrivateDir(filepath.Join(in.attempt, "worker")); err != nil {
+		return false, fail(CodeUncertain)
+	}
+	if in.tmpInfo, err = checkPrivateDir(filepath.Join(in.attempt, "worker", "tmp")); err != nil || !in.stateSafe() {
+		return false, fail(CodeUncertain)
+	}
 	createdAt := d.Now().UTC().Format(state.TimeLayout)
 	sup, err := marshal(suppliedInputs(req.RunID, in))
 	if err != nil {
 		return false, fail(CodeUncertain)
 	}
-	srcManifest, err := marshal(sourceManifest{1, claude.SourceMatrixID, createdAt, in.observed})
+	srcManifest, err := marshal(sourceManifest{1, claude.SourceMatrixID, createdAt, in.observed, in.baseObs})
 	if err != nil {
 		return false, fail(CodeUncertain)
 	}
@@ -217,7 +250,7 @@ func RunWith(ctx context.Context, req Request, stdout io.Writer, d Deps) (comple
 	res.InjectionDisposition, res.ReceiptState, res.CreatedAt = claude.InjectionDisposition, receiptRecorded, createdAt
 
 	var changes []byte
-	prestart := in.recheck(d) == nil && d.at("prestart") == nil
+	prestart := in.stateSafe() && in.recheck(d) == nil && d.at("prestart") == nil
 	if prestart {
 		changes = in.launch(ctx, d, &res)
 	}
@@ -232,6 +265,12 @@ func RunWith(ctx context.Context, req Request, stdout io.Writer, d Deps) (comple
 		out = RenderText(res)
 	}
 	if len(data) > MaxOutput || len(out) > MaxOutput || d.at("output-limit") != nil {
+		return false, fail(CodeUncertain)
+	}
+	// A state root, namespace or attempt that is no longer the retained safe
+	// directory makes publication unsafe: nothing more is published, the
+	// attempt stays blocked and every worktree edit is preserved.
+	if !in.stateSafe() {
 		return false, fail(CodeUncertain)
 	}
 	if changes != nil {
@@ -269,6 +308,12 @@ func validate(ctx context.Context, req Request, d Deps) (*inputs, error) {
 	if in.rootP, err = physical(req.StateDir); err != nil {
 		return nil, fail(CodeStateUnavailable)
 	}
+	if in.rootInfo, err = checkPrivateDir(in.rootP); err != nil {
+		if err == fs.ErrNotExist {
+			return nil, fail(CodeStateUnavailable)
+		}
+		return nil, err
+	}
 	in.ns = filepath.Join(in.rootP, Namespace)
 	if err := checkNamespace(in.ns); err != nil {
 		return nil, err
@@ -276,7 +321,7 @@ func validate(ctx context.Context, req Request, d Deps) (*inputs, error) {
 	if cancelled() {
 		return nil, fail(CodeCancelled)
 	}
-	planBytes, planPath, err := readPrivate(req.Plan, MaxPlanBytes, CodePlanUnavailable, CodeInvalidPlan)
+	planBytes, planPath, planInfo, err := readPrivateInfo(req.Plan, MaxPlanBytes, CodePlanUnavailable, CodeInvalidPlan)
 	if err != nil {
 		return nil, err
 	}
@@ -284,14 +329,15 @@ func validate(ctx context.Context, req Request, d Deps) (*inputs, error) {
 	if err != nil {
 		return nil, err
 	}
-	taskBytes, taskPath, err := readPrivate(plan.TaskFile, MaxTaskBytes, CodePlanUnavailable, CodeInvalidPlan)
+	taskBytes, taskPath, taskInfo, err := readPrivateInfo(plan.TaskFile, MaxTaskBytes, CodePlanUnavailable, CodeInvalidPlan)
 	if err != nil {
 		return nil, err
 	}
-	profBytes, profPath, err := readPrivate(plan.ProfileFile, claude.MaxProfile, CodeProfileUnavailable, CodeProfileUnavailable)
+	profBytes, profPath, profInfo, err := readPrivateInfo(plan.ProfileFile, claude.MaxProfile, CodeProfileUnavailable, CodeProfileUnavailable)
 	if err != nil {
 		return nil, err
 	}
+	in.planInfo, in.taskInfo, in.profileInfo = planInfo, taskInfo, profInfo
 	if in.profile, err = claude.ParseProfile(profBytes); err != nil {
 		return nil, fail(CodeProfileUnavailable)
 	}
@@ -303,6 +349,18 @@ func validate(ctx context.Context, req Request, d Deps) (*inputs, error) {
 	if in.rec, err = root.Read(req.RunID); err != nil {
 		return nil, err
 	}
+	if in.recordsInfo, err = checkPrivateDir(filepath.Join(in.rootP, state.Namespace)); err != nil {
+		return nil, fail(CodeStateChanged)
+	}
+	recordBytes, recordPath, recordInfo, err := readPrivateInfo(filepath.Join(in.rootP, state.Namespace, req.RunID+".json"), state.MaxRecordBytes, CodeStateChanged, CodeStateChanged)
+	if err != nil {
+		return nil, err
+	}
+	boundRecord, err := state.Parse(recordBytes, req.RunID)
+	if err != nil || boundRecord != in.rec {
+		return nil, fail(CodeStateChanged)
+	}
+	in.recordPath, in.recordInfo, in.recordSHA = recordPath, recordInfo, sum(recordBytes)
 	if cancelled() {
 		return nil, fail(CodeCancelled)
 	}
@@ -320,6 +378,9 @@ func validate(ctx context.Context, req Request, d Deps) (*inputs, error) {
 		return nil, fail(CodeNotClean)
 	}
 	in.top = top
+	if !ruleWorkspace(top) {
+		return nil, fail(CodeUnsafeLayout)
+	}
 	if in.topInfo, err = os.Stat(top); err != nil {
 		return nil, fail(CodeUnsafeLayout)
 	}
@@ -345,11 +406,20 @@ func validate(ctx context.Context, req Request, d Deps) (*inputs, error) {
 	if es, err := in.g.status(); err != nil || len(es) != 0 {
 		return nil, fail(CodeNotClean)
 	}
+	if clean, err := in.g.flagsClean(); err != nil || !clean {
+		return nil, fail(CodeNotClean)
+	}
 	if in.control, err = in.g.control(); err != nil {
 		return nil, fail(CodeNotClean)
 	}
 	if in.tree, err = in.g.tree(in.rec.RepositoryHead, in.width); err != nil {
 		return nil, fail(CodeInstructionsUnavailable)
+	}
+	if in.snap, err = takeSnapshot(top, repo.ObjectFormat); err != nil {
+		return nil, fail(CodeUnsafeLayout)
+	}
+	if err := matchesTree(in.snap, in.tree); err != nil {
+		return nil, err
 	}
 	if in.bodies, err = verifyInstructions(top, in.task.Instructions, in.tree, repo.ObjectFormat); err != nil {
 		return nil, err
@@ -378,7 +448,10 @@ func validate(ctx context.Context, req Request, d Deps) (*inputs, error) {
 	if in.sources, err = claude.Matrix(in.profile.UserHome, top, in.nested); err != nil {
 		return nil, fail(CodeSourceUnavailable)
 	}
-	if in.observed, err = observeSources(in.sources, d); err != nil {
+	if in.bases, err = claude.Bases(in.profile.UserHome, top, in.nested); err != nil {
+		return nil, fail(CodeSourceUnavailable)
+	}
+	if in.observed, in.baseObs, err = in.observeSources(d); err != nil {
 		return nil, err
 	}
 	if cancelled() {
@@ -394,40 +467,78 @@ func validate(ctx context.Context, req Request, d Deps) (*inputs, error) {
 	return in, nil
 }
 
-func observeSources(paths []claude.SourcePath, d Deps) ([]claude.SourceEntry, error) {
+// observeSources observes every matrix row and every base directory the rows
+// hang from (claude.Bases).
+func (in *inputs) observeSources(d Deps) ([]claude.SourceEntry, []claude.SourceEntry, error) {
 	uid := uint32(os.Getuid())
-	es, err := claude.Observe(paths, uid, d.SourceLstat)
+	es, err := claude.Observe(in.sources, uid, d.SourceLstat)
 	if err == nil {
 		err = claude.CheckOwners(es, uid)
 	}
-	if err != nil {
-		return nil, fail(CodeSourceUnavailable)
+	var bs []claude.SourceEntry
+	if err == nil {
+		bs, err = claude.ObserveBases(in.bases, uid, d.SourceLstat)
 	}
-	return es, nil
+	if err != nil {
+		return nil, nil, fail(CodeSourceUnavailable)
+	}
+	return es, bs, nil
 }
 
-// recheck repeats the input, instruction, pin, source, repository and
-// control observations immediately before native start.
-func (in *inputs) recheck(d Deps) error {
-	changed := fail(CodeInputChanged)
-	for _, f := range []struct{ path, want string }{{in.planPath, in.planSHA}, {in.taskPath, in.taskSHA}, {in.profilePath, in.profileFileSHA}} {
-		b, _, err := readPrivate(f.path, MaxTaskBytes, CodeInputChanged, CodeInputChanged)
-		if err != nil || sum(b) != f.want {
-			return changed
+// stateSafe reports whether the state root, both namespaces, attempt and scratch are each
+// still a private 0700 directory owned by the operator and the same
+// directory (device and inode) retained at validation or acquisition.
+func (in *inputs) stateSafe() bool {
+	for _, c := range []struct {
+		path string
+		want os.FileInfo
+	}{{in.rootP, in.rootInfo}, {filepath.Join(in.rootP, state.Namespace), in.recordsInfo}, {in.ns, in.nsInfo}, {in.attempt, in.attemptInfo},
+		{filepath.Join(in.attempt, "worker"), in.workerInfo}, {filepath.Join(in.attempt, "worker", "tmp"), in.tmpInfo}} {
+		fi, err := checkPrivateDir(c.path)
+		if err != nil || c.want == nil || !os.SameFile(fi, c.want) {
+			return false
 		}
 	}
-	if !in.unchanged(d) {
+	return true
+}
+
+// inputsSame reports whether the plan, task, profile and saved record are still safe,
+// the same files (device and inode) with the same mode, and the same bytes.
+// A byte-identical substitute is a change.
+func (in *inputs) inputsSame() bool {
+	for _, f := range []struct {
+		path, want string
+		info       os.FileInfo
+	}{{in.planPath, in.planSHA, in.planInfo}, {in.taskPath, in.taskSHA, in.taskInfo}, {in.profilePath, in.profileFileSHA, in.profileInfo}, {in.recordPath, in.recordSHA, in.recordInfo}} {
+		b, _, fi, err := readPrivateInfo(f.path, MaxTaskBytes, CodeInputChanged, CodeInputChanged)
+		if err != nil || sum(b) != f.want || !os.SameFile(fi, f.info) || fi.Mode() != f.info.Mode() {
+			return false
+		}
+	}
+	return true
+}
+
+// recheck repeats the input, instruction, pin, source, repository, control
+// and full worktree observations immediately before native start.
+func (in *inputs) recheck(d Deps) error {
+	changed := fail(CodeInputChanged)
+	if !in.inputsSame() || !in.unchanged(d) {
 		return changed
 	}
 	es, err := in.g.status()
 	if err != nil || len(es) != 0 {
 		return changed
 	}
+	snap, err := takeSnapshot(in.top, in.rec.RepositoryObjectFormat)
+	if err != nil || !unchangedExcept(in.snap, snap, nil) {
+		return changed
+	}
 	return nil
 }
 
 // unchanged reports whether the pin, instructions, worktree identity, HEAD,
-// control identity and source matrix still match the validated observations.
+// control identity, source matrix and base directories still match the
+// validated observations.
 func (in *inputs) unchanged(d Deps) bool {
 	if sha, err := checkPin(in.profile); err != nil || sha != in.exeSHA {
 		return false
@@ -441,8 +552,8 @@ func (in *inputs) unchanged(d Deps) bool {
 	if ctl, err := in.g.control(); err != nil || string(ctl) != string(in.control) {
 		return false
 	}
-	after, err := observeSources(in.sources, d)
-	return err == nil && !claude.SourcesChanged(in.observed, after)
+	after, bases, err := in.observeSources(d)
+	return err == nil && !claude.SourcesChanged(in.observed, after) && !claude.BasesChanged(in.baseObs, bases)
 }
 
 // launch opens the published packet, runs the native worker once and
@@ -486,20 +597,19 @@ func (in *inputs) launch(ctx context.Context, d Deps, res *Result) []byte {
 	if !usable || obs.ExitCode != 0 || perr != nil || !res.StreamSummary.TerminalVerified {
 		return nil
 	}
-	// Post-return observations; any drift invalidates the attempt.
-	for _, f := range []struct{ path, want string }{{in.planPath, in.planSHA}, {in.taskPath, in.taskSHA}, {in.profilePath, in.profileFileSHA}} {
-		b, _, err := readPrivate(f.path, MaxTaskBytes, CodeInputChanged, CodeInputChanged)
-		if err != nil || sum(b) != f.want {
-			return nil
-		}
-	}
-	if d.at("post-observation") != nil || !in.unchanged(d) {
+	// Post-return observations; any drift invalidates the attempt. The state
+	// directories are rechecked by the caller before publication.
+	if d.at("post-observation") != nil || !in.inputsSame() || !in.unchanged(d) {
 		return nil
 	}
 	if h, err := in.g.head(); err != nil || h != in.rec.RepositoryHead {
 		return nil
 	}
-	manifest, ok := captureChanges(in.g, in.top, res.RunID, in.task.AllowedChanges, in.tree, in.rec.RepositoryObjectFormat)
+	post, err := takeSnapshot(in.top, in.rec.RepositoryObjectFormat)
+	if err != nil {
+		return nil
+	}
+	manifest, ok := captureChanges(in.g, res.RunID, in.task.AllowedChanges, in.tree, in.snap, post)
 	if !ok {
 		return nil
 	}

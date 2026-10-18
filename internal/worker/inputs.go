@@ -113,6 +113,20 @@ func RelPath(p string) bool {
 	return true
 }
 
+// ruleWorkspace rejects characters interpreted as native permission-rule syntax.
+// The frozen argv requires a literal workspace prefix, not a caller pattern.
+func ruleWorkspace(p string) bool {
+	if !utf8.ValidString(p) || strings.ContainsAny(p, globChars+"()") {
+		return false
+	}
+	for _, r := range p {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
 // controlPath reports a native-source or Git control path that a worker may
 // never be allowed to change.
 func controlPath(p string) bool {
@@ -217,30 +231,33 @@ func fileSafety(fi fs.FileInfo) error {
 	return nil
 }
 
-// readPrivate safely reads one private 0600 regular file outside the
+// readPrivateInfo safely reads one private 0600 regular file outside the
 // worktree without following a final link or blocking on a FIFO. Safety is
 // checked on the Lstat and on the opened descriptor before identity. A close
 // failure is reported only when everything earlier succeeded. unavailable is
 // the code for absent or unreadable input; tooLarge for more than limit bytes.
-func readPrivate(path string, limit int, unavailable, tooLarge Code) ([]byte, string, error) {
+// It also returns the opened file's metadata, so a later recheck can compare
+// its identity (device and inode) and mode independently of its bytes.
+func readPrivateInfo(path string, limit int, unavailable, tooLarge Code) ([]byte, string, fs.FileInfo, error) {
 	phys, err := physical(path)
 	if err != nil {
-		return nil, "", fail(unavailable)
+		return nil, "", nil, fail(unavailable)
 	}
 	lfi, err := os.Lstat(phys)
 	if err != nil {
-		return nil, "", fail(unavailable)
+		return nil, "", nil, fail(unavailable)
 	}
 	if err := fileSafety(lfi); err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	f, err := os.OpenFile(phys, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ELOOP) {
-			return nil, "", fail(CodeStateChanged)
+			return nil, "", nil, fail(CodeStateChanged)
 		}
-		return nil, "", fail(unavailable)
+		return nil, "", nil, fail(unavailable)
 	}
+	var ofi fs.FileInfo
 	data, rerr := func() ([]byte, error) {
 		fi, err := f.Stat()
 		if err != nil {
@@ -252,6 +269,7 @@ func readPrivate(path string, limit int, unavailable, tooLarge Code) ([]byte, st
 		if !os.SameFile(fi, lfi) {
 			return nil, fail(CodeStateChanged)
 		}
+		ofi = fi
 		data, err := io.ReadAll(io.LimitReader(f, int64(limit)+1))
 		if err != nil {
 			return nil, fail(unavailable)
@@ -263,12 +281,12 @@ func readPrivate(path string, limit int, unavailable, tooLarge Code) ([]byte, st
 	}()
 	cerr := f.Close()
 	if rerr != nil {
-		return nil, "", rerr
+		return nil, "", nil, rerr
 	}
 	if cerr != nil {
-		return nil, "", fail(unavailable)
+		return nil, "", nil, fail(unavailable)
 	}
-	return data, phys, nil
+	return data, phys, ofi, nil
 }
 
 // readWorktreeFile reads one regular file below the canonical worktree w

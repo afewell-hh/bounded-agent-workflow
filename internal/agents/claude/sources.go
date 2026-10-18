@@ -93,17 +93,33 @@ func EncodedProject(w string) string { return strings.ReplaceAll(w, "/", "-") }
 
 // Matrix generates the deduplicated concrete path list for home h, canonical
 // worktree w and nested directories n (repository-relative, from the launch
-// tree). The first occurrence of a duplicate path keeps its row. It fails
+// tree). Overlapping rows keep the strictest disposition and owner rule. It fails
 // above MaxSourcePaths.
 func Matrix(h, w string, n []string) ([]SourcePath, error) {
 	var out []SourcePath
-	seen := map[string]bool{}
+	seen := map[string]int{}
+	priority := func(class string) int {
+		switch class {
+		case ClassAdmin, ClassAlternate, ClassMemory:
+			return 3 // required absent
+		case ClassUser:
+			return 2 // operator-only ownership
+		case ClassEntry, ClassScoped, ClassCustom:
+			return 1
+		default:
+			return 0 // mutable native state cannot relax a source row
+		}
+	}
 	add := func(base, suffix, class, kind string) {
 		p := filepath.Join(base, suffix)
-		if !seen[p] {
-			seen[p] = true
-			out = append(out, SourcePath{Path: p, Base: base, Class: class, Kind: kind})
+		if i, exists := seen[p]; exists {
+			if priority(class) > priority(out[i].Class) {
+				out[i] = SourcePath{Path: p, Base: base, Class: class, Kind: kind}
+			}
+			return
 		}
+		seen[p] = len(out)
+		out = append(out, SourcePath{Path: p, Base: base, Class: class, Kind: kind})
 	}
 	dirs := Ancestors(w)
 	for _, rel := range n {
@@ -143,7 +159,17 @@ func Matrix(h, w string, n []string) ([]SourcePath, error) {
 	for _, s := range adminDirs {
 		add(AdminRoot, s, ClassAdmin, KindDir)
 	}
-	if len(out) > MaxSourcePaths {
+	bases, err := Bases(h, w, n)
+	if err != nil {
+		return nil, err
+	}
+	count := len(out)
+	for _, b := range bases {
+		if _, exists := seen[b]; !exists {
+			count++
+		}
+	}
+	if count > MaxSourcePaths {
 		return nil, ErrSourceUnavailable
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
@@ -171,20 +197,103 @@ func Observe(paths []SourcePath, uid uint32, lstat Lstat) ([]SourceEntry, error)
 	return out, nil
 }
 
+// dirSafe reports a real directory (not a link) owned by uid or root, not
+// group/other writable and without setuid, setgid or sticky bits. No host
+// path is exempt.
+func dirSafe(fi fs.FileInfo, uid uint32) bool {
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	return ok && fi.Mode()&fs.ModeSymlink == 0 && fi.IsDir() && (st.Uid == uid || st.Uid == 0) &&
+		fi.Mode().Perm()&0o022 == 0 && fi.Mode()&(fs.ModeSetuid|fs.ModeSetgid|fs.ModeSticky) == 0
+}
+
+// observeOne requires the row's base directory itself to be safe (dirSafe)
+// before walking the suffix chain.
 func observeOne(sp SourcePath, uid uint32, lstat Lstat) (SourceEntry, error) {
 	e := SourceEntry{Path: sp.Path, Class: sp.Class, Kind: sp.Kind}
 	fi, err := lstat(sp.Base)
 	if err != nil {
-		if sp.Class == ClassAdmin && errors.Is(err, fs.ErrNotExist) {
-			// The admin root itself is absent: validate its parent chain.
-			return absentBelow(e, filepath.Dir(sp.Base), sp.Path, uid, lstat)
+		if sp.Class == ClassAdmin && errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ENOTDIR) {
+			// The admin root itself is absent: validate its parent and chain.
+			parent := filepath.Dir(sp.Base)
+			pfi, perr := lstat(parent)
+			if perr != nil || !dirSafe(pfi, uid) {
+				return e, ErrSourceUnavailable
+			}
+			return absentBelow(e, parent, sp.Path, uid, lstat)
 		}
 		return e, ErrSourceUnavailable
 	}
-	if fi.Mode()&fs.ModeSymlink != 0 || !fi.IsDir() {
+	if !dirSafe(fi, uid) {
 		return e, ErrSourceUnavailable
 	}
 	return absentBelow(e, sp.Base, sp.Path, uid, lstat)
+}
+
+// ClassBase labels a base directory observation.
+const ClassBase = "base"
+
+// Bases lists the directories the matrix rows hang from: w and every
+// ancestor (root first), each nested directory with every intermediate
+// directory between w and it, and h. Duplicates are removed and the list is
+// bounded by MaxSourcePaths. The admin root is checked by Observe.
+func Bases(h, w string, n []string) ([]string, error) {
+	var out []string
+	seen := map[string]bool{}
+	add := func(p string) {
+		if !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	for _, a := range Ancestors(w) {
+		add(a)
+	}
+	for _, rel := range n {
+		parts := strings.Split(rel, "/")
+		for i := range parts {
+			add(filepath.Join(w, strings.Join(parts[:i+1], "/")))
+		}
+	}
+	add(h)
+	if len(out) > MaxSourcePaths {
+		return nil, ErrSourceUnavailable
+	}
+	return out, nil
+}
+
+// ObserveBases observes each base directory by metadata only. Every base must
+// exist and be dirSafe; absence, an error or anything else is unavailable.
+func ObserveBases(bases []string, uid uint32, lstat Lstat) ([]SourceEntry, error) {
+	if lstat == nil {
+		lstat = os.Lstat
+	}
+	out := make([]SourceEntry, 0, len(bases))
+	for _, b := range bases {
+		fi, err := lstat(b)
+		if err != nil || !dirSafe(fi, uid) {
+			return nil, ErrSourceUnavailable
+		}
+		st := fi.Sys().(*syscall.Stat_t)
+		u, mode, dev, ino := st.Uid, uint32(fi.Mode()), uint64(st.Dev), uint64(st.Ino)
+		out = append(out, SourceEntry{Path: b, Class: ClassBase, Kind: KindDir, Status: StatusSafe,
+			UID: &u, Mode: &mode, Dev: &dev, Ino: &ino})
+	}
+	return out, nil
+}
+
+// BasesChanged compares two base observations: path, owner, mode, device and
+// inode of every base. Modification times are never compared.
+func BasesChanged(before, after []SourceEntry) bool {
+	if len(before) != len(after) {
+		return true
+	}
+	for i := range before {
+		b, a := before[i], after[i]
+		if b.Path != a.Path || *b.UID != *a.UID || *b.Mode != *a.Mode || *b.Dev != *a.Dev || *b.Ino != *a.Ino {
+			return true
+		}
+	}
+	return false
 }
 
 // absentBelow walks from the existing directory base to path one component
@@ -212,9 +321,7 @@ func absentBelow(e SourceEntry, base, path string, uid uint32, lstat Lstat) (Sou
 			return e, ErrSourceUnavailable
 		}
 		if i < len(parts)-1 {
-			st, ok := fi.Sys().(*syscall.Stat_t)
-			if !fi.IsDir() || !ok || (st.Uid != uid && st.Uid != 0) ||
-				fi.Mode().Perm()&0o022 != 0 || fi.Mode()&(fs.ModeSetuid|fs.ModeSetgid|fs.ModeSticky) != 0 {
+			if !dirSafe(fi, uid) {
 				return e, ErrSourceUnavailable
 			}
 			continue

@@ -178,20 +178,25 @@ type changeManifest struct {
 	Changes       []changeEntry `json:"changes"`
 }
 
-// captureChanges is the bounded full worktree capture: every tracked,
-// index, untracked and ignored difference reported by guarded Git must be a
-// worktree-only change to an allowed path (no index change, conflict or
-// directory entry), and every allowed path is read through no-follow
-// handling and hashed within the file and total bounds. ok is false on any
-// violation or overflow; nothing is truncated or rolled back.
-func captureChanges(g *git, top, runID string, allowed []string, tree map[string]treeEntry, format string) ([]byte, bool) {
-	es, err := g.status()
-	if err != nil || len(es) > MaxChangeFiles {
-		return nil, false
-	}
+// captureChanges builds the change manifest from the bounded full worktree
+// captures taken before launch and after return (see takeSnapshot). Every
+// path outside allowed must be identical in both captures, so an edit hidden
+// from Git status (for example by an index flag) is still a difference. As a
+// further check every difference reported by guarded Git must be a
+// worktree-only change to an allowed path. An allowed path must be absent or
+// a regular file afterwards. ok is false on any violation; nothing is
+// truncated or rolled back.
+func captureChanges(g *git, runID string, allowed []string, tree map[string]treeEntry, before, after snapshot) ([]byte, bool) {
 	ok := map[string]bool{}
 	for _, p := range allowed {
 		ok[p] = true
+	}
+	if !unchangedExcept(before, after, ok) {
+		return nil, false
+	}
+	es, err := g.status()
+	if err != nil || len(es) > MaxChangeFiles {
+		return nil, false
 	}
 	for _, e := range es {
 		switch {
@@ -202,34 +207,28 @@ func captureChanges(g *git, top, runID string, allowed []string, tree map[string
 		}
 	}
 	m := changeManifest{SchemaVersion: 1, RunID: runID, Changes: []changeEntry{}}
-	total := 0
 	for _, p := range allowed {
-		data, fi, present, err := readWorktreeFile(top, p, MaxChangeFile)
-		if err != nil {
-			return nil, false
-		}
-		t, tracked := tree[p]
+		a, present := after[p]
+		b := before[p]
+		_, tracked := tree[p]
 		c := changeEntry{Path: p}
 		switch {
+		case present && a.kind != 'F':
+			return nil, false
 		case !present && tracked:
 			c.State = "deleted"
 		case !present:
 			c.State = "absent"
 		default:
-			total += len(data)
-			if total > MaxChangeTotal {
-				return nil, false
-			}
-			h, n := sum(data), len(data)
-			mode := uint32(fi.Mode())
+			h, n, mode := a.sha256, int(a.size), uint32(a.mode)
 			c.SHA256, c.Size, c.Mode = &h, &n, &mode
 			switch {
-			case tracked && blobOID(format, data) == t.oid && (fi.Mode().Perm()&0o111 != 0) == (t.mode == "100755"):
-				c.State = changeStateSame
-			case tracked:
-				c.State = "modified"
-			default:
+			case !tracked:
 				c.State = "added"
+			case b.kind == 'F' && b.sha256 == a.sha256 && b.mode == a.mode:
+				c.State = changeStateSame
+			default:
+				c.State = "modified"
 			}
 		}
 		m.Changes = append(m.Changes, c)
@@ -276,4 +275,5 @@ type sourceManifest struct {
 	MatrixID      string               `json:"matrix_id"`
 	CapturedAt    string               `json:"captured_at"`
 	Entries       []claude.SourceEntry `json:"entries"`
+	Bases         []claude.SourceEntry `json:"bases"`
 }

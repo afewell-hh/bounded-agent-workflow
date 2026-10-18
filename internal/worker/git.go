@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -121,10 +123,66 @@ func (g *git) head() (string, error) {
 	return strings.TrimSuffix(string(out), "\n"), nil
 }
 
-// control returns a content-free identity of the Git control state: the
-// symbolic HEAD, the resolved HEAD and the full staged index listing.
+// flagsClean reports whether every index entry carries no assume-unchanged
+// or skip-worktree flag (each `ls-files -v` tag is exactly "H").
+func (g *git) flagsClean() (bool, error) {
+	out, err := g.run("ls-files", "-v", "-z")
+	if err != nil {
+		return false, errGit
+	}
+	for _, rec := range bytes.Split(out, []byte{0}) {
+		if len(rec) != 0 && (len(rec) < 3 || rec[0] != 'H' || rec[1] != ' ') {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// dirs returns the physical per-worktree Git directory and common directory.
+func (g *git) dirs() (gitDir, common string, err error) {
+	out, err := g.run("rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir")
+	if err != nil {
+		return "", "", errGit
+	}
+	lines := strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
+	if len(lines) != 2 {
+		return "", "", errGit
+	}
+	var phys [2]string
+	for i, l := range lines {
+		if !filepath.IsAbs(l) {
+			return "", "", errGit
+		}
+		if phys[i], err = filepath.EvalSymlinks(l); err != nil {
+			return "", "", errGit
+		}
+	}
+	return phys[0], phys[1], nil
+}
+
+// control returns a private identity of the Git control state: the symbolic
+// HEAD, the resolved HEAD, the full staged index listing, every index entry's
+// flags, the Git directories and the bounded metadata and content hashes of
+// the fixed control entries (see controlFiles). It is compared in memory and
+// never published.
 func (g *git) control() ([]byte, error) {
+	// Includes introduce configuration outside the fixed control capture.
+	// Reject that layout instead of opening or claiming to bind those sources.
+	names, err := g.run("config", "--local", "--no-includes", "--name-only", "--list", "-z")
+	if err != nil {
+		return nil, errGit
+	}
+	for _, name := range bytes.Split(names, []byte{0}) {
+		n := strings.ToLower(string(name))
+		if n == "include.path" || strings.HasPrefix(n, "includeif.") {
+			return nil, errGit
+		}
+	}
 	var b bytes.Buffer
+	section := func(name string, data []byte) {
+		b.WriteString(name + " " + strconv.Itoa(len(data)) + "\n")
+		b.Write(data)
+	}
 	sym, err := g.run("symbolic-ref", "-q", "HEAD")
 	if err != nil {
 		var ee *proc.ExitError
@@ -133,16 +191,31 @@ func (g *git) control() ([]byte, error) {
 		}
 		sym = []byte("detached\n")
 	}
-	b.Write(sym)
+	section("symbolic", sym)
 	h, err := g.head()
 	if err != nil {
 		return nil, err
 	}
-	b.WriteString(h + "\n")
+	section("head", []byte(h))
 	idx, err := g.run("ls-files", "--stage", "-z")
 	if err != nil {
 		return nil, errGit
 	}
-	b.Write(idx)
+	section("stage", idx)
+	flags, err := g.run("ls-files", "-v", "-z")
+	if err != nil {
+		return nil, errGit
+	}
+	section("flags", flags)
+	gitDir, common, err := g.dirs()
+	if err != nil {
+		return nil, err
+	}
+	section("dirs", []byte(gitDir+"\x00"+common))
+	files, err := controlFiles(g.dir, gitDir, common)
+	if err != nil {
+		return nil, errGit
+	}
+	section("files", files)
 	return b.Bytes(), nil
 }

@@ -96,7 +96,7 @@ func TestMatrixCompleteEnumeration(t *testing.T) {
 }
 
 // A home that is a worktree ancestor yields each shared path once, keeping
-// its first (project) row; an oversized list fails before any observation.
+// the stricter user row; an oversized list fails before any observation.
 func TestMatrixDedupAndBound(t *testing.T) {
 	got, err := Matrix("/u", "/u/r", nil)
 	if err != nil {
@@ -105,7 +105,7 @@ func TestMatrixDedupAndBound(t *testing.T) {
 	seen := map[string]int{}
 	for _, sp := range got {
 		seen[sp.Path]++
-		if sp.Path == "/u/.claude/CLAUDE.md" && sp.Class != ClassEntry {
+		if sp.Path == "/u/.claude/CLAUDE.md" && sp.Class != ClassUser {
 			t.Errorf("shared path kept class %s", sp.Class)
 		}
 	}
@@ -331,5 +331,237 @@ func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// handPresentAllowed is the hand-written present disposition of each row
+// class: safe present user and project sources are recorded; alternate
+// configuration, fresh project memory and admin-managed sources stop.
+var handPresentAllowed = map[string]bool{"entry": true, "scoped_settings": true, "scoped_custom": true, "user": true,
+	"native_state": true, "alternate_config": false, "project_memory": false, "admin_managed": false}
+
+type handRow struct{ class, kind, path string }
+
+// handRows expands the hand-written rows for this fixture: rows 1-3 for W and
+// the nested directory W/sub, and every fixed row with /h replaced by H and
+// -w by H's hand-encoded worktree name. Admin rows keep AdminRoot paths.
+func (f srcFixture) handRows() []handRow {
+	var rows []handRow
+	for _, d := range []string{f.w, filepath.Join(f.w, "sub")} {
+		for _, r := range handDirRows {
+			c := strings.SplitN(r, " ", 3)
+			rows = append(rows, handRow{c[0], c[1], d + "/" + c[2]})
+		}
+	}
+	enc := strings.ReplaceAll(f.w, "/", "-")
+	for _, r := range handFixedRows {
+		c := strings.SplitN(r, " ", 3)
+		p := c[2]
+		if strings.HasPrefix(p, "/h/") {
+			p = f.h + p[2:]
+		}
+		rows = append(rows, handRow{c[0], c[1], strings.Replace(p, "/-w/", "/"+enc+"/", 1)})
+	}
+	return rows
+}
+
+// onDisk maps an admin row path into the fixture's admin directory.
+func onDisk(p, admin string) string {
+	if strings.HasPrefix(p, AdminRoot+"/") {
+		return admin + strings.TrimPrefix(p, AdminRoot)
+	}
+	return p
+}
+
+// Every matrix row is exercised absent, present, unsafe, wrong-type and
+// unavailable against the hand-written expectations; the production row
+// lists are not the oracle.
+func TestObserveEveryRowDisposition(t *testing.T) {
+	template := newSrcFixture(t)
+	n := len(template.handRows())
+	if n != 2*14+31 {
+		t.Fatalf("hand rows %d", n)
+	}
+	for idx := 0; idx < n; idx++ {
+		for _, disp := range []string{"absent", "present", "unsafe", "wrong type", "unavailable"} {
+			f := newSrcFixture(t)
+			must(t, os.Mkdir(filepath.Join(f.w, "sub"), 0o755))
+			admin := filepath.Join(filepath.Dir(f.h), "admin")
+			must(t, os.Mkdir(admin, 0o755))
+			row := f.handRows()[idx]
+			disk := onDisk(row.path, admin)
+			create := func(dir bool, perm os.FileMode) {
+				must(t, os.MkdirAll(filepath.Dir(disk), 0o755))
+				if dir {
+					must(t, os.Mkdir(disk, perm))
+				} else {
+					must(t, os.WriteFile(disk, nil, perm))
+				}
+				must(t, os.Chmod(disk, perm))
+			}
+			isDir := row.kind == "D"
+			lstat := f.lstat(admin)
+			switch disp {
+			case "present":
+				create(isDir, map[bool]os.FileMode{true: 0o755, false: 0o644}[isDir])
+			case "unsafe":
+				create(isDir, map[bool]os.FileMode{true: 0o775, false: 0o664}[isDir])
+			case "wrong type":
+				create(!isDir, map[bool]os.FileMode{true: 0o755, false: 0o644}[!isDir])
+			case "unavailable":
+				// Real parents, so the walk reaches the row's own path.
+				must(t, os.MkdirAll(filepath.Dir(disk), 0o755))
+				inner := lstat
+				lstat = func(p string) (fs.FileInfo, error) {
+					if p == row.path {
+						return nil, &fs.PathError{Op: "lstat", Path: p, Err: syscall.EACCES}
+					}
+					return inner(p)
+				}
+			}
+			paths, err := Matrix(f.h, f.w, []string{"sub"})
+			must(t, err)
+			es, err := Observe(paths, f.uid, lstat)
+			if err == nil {
+				err = CheckOwners(es, f.uid)
+			}
+			name := disp + " " + row.class + " " + row.path
+			switch {
+			case disp == "absent":
+				if err != nil || status(es, row.path) != StatusAbsent {
+					t.Errorf("%s: %v %s", name, err, status(es, row.path))
+				}
+			case disp == "present" && handPresentAllowed[row.class]:
+				if err != nil || status(es, row.path) != StatusSafe {
+					t.Errorf("%s: %v %s", name, err, status(es, row.path))
+				}
+			default:
+				if err != ErrSourceUnavailable {
+					t.Errorf("%s: %v, want unavailable", name, err)
+				}
+			}
+		}
+	}
+}
+
+// fakeInfo overrides the mode and stat of a real directory's metadata.
+type fakeInfo struct {
+	fs.FileInfo
+	mode fs.FileMode
+	st   *syscall.Stat_t
+}
+
+func (i fakeInfo) Mode() fs.FileMode { return i.mode }
+func (i fakeInfo) IsDir() bool       { return i.mode.IsDir() }
+func (i fakeInfo) Sys() any          { return i.st }
+
+// Base directories themselves (W, nested bases, H and their intermediate
+// directories) must be safe; a safe base is accepted.
+func TestObserveBaseSafety(t *testing.T) {
+	observeAll := func(f srcFixture, nested []string, lstat Lstat) error {
+		paths, err := Matrix(f.h, f.w, nested)
+		must(t, err)
+		if _, err := Observe(paths, f.uid, lstat); err != nil {
+			return err
+		}
+		bases, err := Bases(f.h, f.w, nested)
+		must(t, err)
+		_, err = ObserveBases(bases, f.uid, lstat)
+		return err
+	}
+	f := newSrcFixture(t)
+	must(t, os.MkdirAll(filepath.Join(f.w, "a", "b"), 0o755))
+	if err := observeAll(f, []string{"a/b"}, f.lstat("")); err != nil {
+		t.Fatalf("safe bases: %v", err)
+	}
+	cases := []struct {
+		name string
+		path func(f srcFixture) string
+		mode os.FileMode
+	}{
+		{"worktree other-writable", func(f srcFixture) string { return f.w }, 0o777},
+		{"worktree group-writable", func(f srcFixture) string { return f.w }, 0o775},
+		{"nested base writable", func(f srcFixture) string { return filepath.Join(f.w, "a", "b") }, 0o777},
+		{"intermediate between worktree and nested base", func(f srcFixture) string { return filepath.Join(f.w, "a") }, 0o777},
+		{"home writable", func(f srcFixture) string { return f.h }, 0o777},
+	}
+	for _, c := range cases {
+		f := newSrcFixture(t)
+		must(t, os.MkdirAll(filepath.Join(f.w, "a", "b"), 0o755))
+		must(t, os.Chmod(c.path(f), c.mode))
+		if err := observeAll(f, []string{"a/b"}, f.lstat("")); err != ErrSourceUnavailable {
+			t.Errorf("%s: %v", c.name, err)
+		}
+	}
+	// Special bits and a foreign owner, presented through the metadata seam.
+	for _, c := range []struct {
+		name string
+		edit func(fi fs.FileInfo, st *syscall.Stat_t) fs.FileMode
+	}{
+		{"setgid", func(fi fs.FileInfo, _ *syscall.Stat_t) fs.FileMode { return fi.Mode() | fs.ModeSetgid }},
+		{"sticky", func(fi fs.FileInfo, _ *syscall.Stat_t) fs.FileMode { return fi.Mode() | fs.ModeSticky }},
+		{"foreign owner", func(fi fs.FileInfo, st *syscall.Stat_t) fs.FileMode {
+			st.Uid = f.uid + 1
+			return fi.Mode()
+		}},
+	} {
+		lstat := func(p string) (fs.FileInfo, error) {
+			fi, err := f.lstat("")(p)
+			if err != nil || p != f.w {
+				return fi, err
+			}
+			st := *fi.Sys().(*syscall.Stat_t)
+			if st.Uid == 0 {
+				t.Fatal("fixture owned by root")
+			}
+			mode := c.edit(fi, &st)
+			return fakeInfo{fi, mode, &st}, nil
+		}
+		if err := observeAll(f, []string{"a/b"}, lstat); err != ErrSourceUnavailable {
+			t.Errorf("%s: %v", c.name, err)
+		}
+	}
+}
+
+// The base list is exactly the hand-written set, in order, deduplicated.
+func TestBasesEnumeration(t *testing.T) {
+	got, err := Bases("/h", "/w/x", []string{"a/b", "c", "a"})
+	must(t, err)
+	want := []string{"/", "/w", "/w/x", "/w/x/a", "/w/x/a/b", "/w/x/c", "/h"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("bases %q", got)
+	}
+	got, err = Bases("/w", "/w/x", nil)
+	must(t, err)
+	if strings.Join(got, ",") != "/,/w,/w/x" {
+		t.Fatalf("home ancestor not deduplicated: %q", got)
+	}
+}
+
+// A base mode change or replacement is a structural change; an identical
+// observation is not.
+func TestBasesChanged(t *testing.T) {
+	f := newSrcFixture(t)
+	observe := func() []SourceEntry {
+		bases, err := Bases(f.h, f.w, nil)
+		must(t, err)
+		es, err := ObserveBases(bases, f.uid, nil)
+		must(t, err)
+		return es
+	}
+	before := observe()
+	if BasesChanged(before, observe()) {
+		t.Fatal("identical bases reported changed")
+	}
+	must(t, os.Chmod(f.w, 0o750))
+	if !BasesChanged(before, observe()) {
+		t.Fatal("safe mode change not reported")
+	}
+	must(t, os.Chmod(f.w, 0o755))
+	must(t, os.Rename(f.w, f.w+".old"))
+	must(t, os.Mkdir(f.w, 0o755))
+	must(t, os.Chmod(f.w, 0o755))
+	if !BasesChanged(before, observe()) {
+		t.Fatal("replaced worktree directory not reported")
 	}
 }

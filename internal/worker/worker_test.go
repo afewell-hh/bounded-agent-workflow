@@ -353,7 +353,9 @@ func TestWorkerNativeFailures(t *testing.T) {
 		{"hook event", hook, nil, StateExited, true, false},
 		{"report binding", wrongReport, nil, StateExited, true, false},
 		{"init mismatch", badInit, nil, StateExited, false, false},
-		{"prompt hang timeout", completedStream, &timedOut, StateUnverified, true, true},
+		// A supplied timed-out observation (classification only); the real
+		// prompt-hang, cap and cancellation journeys are in child_test.go.
+		{"supplied timed-out observation", completedStream, &timedOut, StateUnverified, true, true},
 		{"nonzero exit", completedStream, &exit1, StateExited, true, true},
 		{"not started", completedStream, &proc.Observation{}, StateNotStarted, false, false},
 	}
