@@ -26,17 +26,57 @@ implemented candidate on the development branch, not a release.
 
 ## How to run one worker attempt
 
-Starting state: a fresh assigned worktree with a clean committed HEAD (no staged,
-unstaged, untracked **or ignored** files), an existing [run record](run-records.md) whose
-HEAD equals that commit, and a private state directory (`0700`). The lead has audited
-broader and nested instructions for the task and frozen the profile manifest. For BAW,
-that manifest starts with `CLAUDE.md`, `AGENTS.md`, `workflow/protocol.md` and
+Commands in `sh` blocks run in a terminal on the host. JSON blocks are file templates:
+upper-case words such as `RUN_ID` are placeholders you replace, and no placeholder,
+digest or saved record is an approval.
+
+### Prerequisites (owned by the lead)
+
+- An approved, frozen ticket scope for this task and the attempt budget it allows. Its
+  scope SHA-256 and the approved policy commit are the references you will record.
+- A fresh assigned worktree whose HEAD is the committed base for the task, with no staged,
+  unstaged, untracked **or ignored** files and no other writer.
+- A run ID you choose: 32 lowercase hex characters, with no previous worker attempt
+  in this state directory. Its saved run record may already exist. BAW allocates no IDs.
+- A private state directory (`0700`, yours, outside every checkout) used for the run
+  record and the worker attempt, and a private input directory, also outside the
+  worktree, for the plan, task and profile files.
+- The already-reviewed, nonsecret profile manifest for the pinned Claude Code executable
+  and the operator's existing subscription login. This page does not install, log in,
+  update or generate a profile; if none is approved, stop.
+
+The lead has also audited broader and nested instructions for the task. For BAW, the
+instruction list starts with `CLAUDE.md`, `AGENTS.md`, `workflow/protocol.md` and
 `workflow/roles/worker.md`, followed by the documents required by the task and applicable
 nested instructions. Supply full dependencies explicitly: safe mode does not expand
-imports. The lead establishes a different project’s adopted instruction set before use;
-the command validates supplied identities, not semantic completeness or adoption.
+imports, and nothing is fetched or imported automatically. The lead establishes a
+different project’s adopted instruction set before use; the command validates supplied
+identities, not semantic completeness or adoption.
 
-1. Write three private files outside the worktree, each a current-user `0600` regular file:
+### Steps
+
+1. Create the [run record](run-records.md), or check an existing one (shell commands):
+
+   ```sh
+   baw run create --state-dir /abs/state --run-id RUN_ID --repo /abs/worktree \
+     --ticket https://github.com/OWNER/REPO/issues/NUMBER \
+     --scope-sha256 SCOPE_SHA256 --policy-commit POLICY_OID --json
+   baw status --state-dir /abs/state --run-id RUN_ID --json
+   ```
+
+   Create observes the worktree's committed HEAD; a record is never overwritten
+   (`record_exists`), so check an existing one with `baw status` instead. Confirm the
+   saved `repository_head` is the intended base. The record only stores the references
+   you supplied (`authority` is `not_evaluated`); it does not establish approval.
+
+2. Write three private files in the input directory, each a current-user `0600` regular
+   file. Copy these task fields from the saved record:
+
+   | Task field | Record field |
+   |---|---|
+   | `task_id` | `run_id` |
+   | `scope_sha256` | `scope_sha256` |
+   | `base_commit` | `repository_head` |
 
    Plan (at most 65,536 bytes):
 
@@ -44,7 +84,7 @@ the command validates supplied identities, not semantic completeness or adoption
    {"schema_version": 1, "task_file": "/abs/private/task.json", "profile_file": "/abs/private/profile.json"}
    ```
 
-   Task (at most 65,536 bytes; example values):
+   Task (at most 65,536 bytes; placeholder values):
 
    ```json
    {
@@ -55,13 +95,25 @@ the command validates supplied identities, not semantic completeness or adoption
      "task": "Record the marker required by the project rule.",
      "instructions": [
        {"path": "CLAUDE.md", "blob_oid": "BLOB_OID", "sha256": "CONTENT_SHA256"},
-       {"path": "AGENTS.md", "blob_oid": "BLOB_OID", "sha256": "CONTENT_SHA256"}
+       {"path": "AGENTS.md", "blob_oid": "BLOB_OID", "sha256": "CONTENT_SHA256"},
+       {"path": "workflow/protocol.md", "blob_oid": "BLOB_OID", "sha256": "CONTENT_SHA256"},
+       {"path": "workflow/roles/worker.md", "blob_oid": "BLOB_OID", "sha256": "CONTENT_SHA256"}
      ],
      "allowed_changes": ["target.txt"]
    }
    ```
 
-   Profile (the coordinator's nonsecret reviewed manifest; synthetic example values):
+   Append every further applicable document after these four. Take each `blob_oid` and
+   `sha256` from the same committed base as `base_commit`; because the worktree is clean,
+   its bytes must match both. For example (shell commands, run in the worktree):
+
+   ```sh
+   git rev-parse RECORD_HEAD:workflow/protocol.md            # blob_oid
+   git cat-file blob RECORD_HEAD:workflow/protocol.md | shasum -a 256   # sha256
+   ```
+
+   Profile (the coordinator's nonsecret reviewed manifest; synthetic example values that
+   no real attempt accepts — use the approved manifest unchanged):
 
    ```json
    {
@@ -78,21 +130,27 @@ the command validates supplied identities, not semantic completeness or adoption
    }
    ```
 
-2. Run, in a terminal on the host (shell command):
+3. Run the worker with the same state directory and run ID (shell command):
 
    ```sh
    baw run worker --repo /abs/worktree --state-dir /abs/state --run-id RUN_ID \
      --plan /abs/private/plan.json --json
    ```
 
-3. Read the outcome. Exit 0 means `worker_completed_unverified`. A delivered other outcome
-   exits 1 with `baw: worker_failed`. Inspect the worktree change yourself, then commit
-   and verify the candidate under the ticket's gates.
+4. Read the outcome. Exit 0 means `worker_completed_unverified`. A delivered other outcome
+   exits 1 with `baw: worker_failed`. The exit status and the worker's report are
+   observations, not a result you can accept.
+
+5. Hand the change on. The lead examines the full worktree change, including untracked
+   and ignored files, against the ticket scope; runs the ticket's verification and tests;
+   commits the candidate and records its identity; obtains an independent review of that
+   candidate (manual, outside BAW, recorded on the ticket or PR); and integrates it only
+   under the ticket's authority.
 
 Recovery: on `worker_uncertain`, `input_changed` or any outcome other than
 `worker_completed_unverified`, do not rerun the same ID. Preserve the attempt directory
-and the worktree (edits are never rolled back) and diagnose. A new attempt needs a new
-run record and the ticket's attempt budget.
+and the worktree (edits are never rolled back; do not reset or clean them) and diagnose.
+A new attempt needs a new run record and the ticket's attempt budget.
 
 ## Reference
 
