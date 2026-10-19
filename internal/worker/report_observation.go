@@ -1,7 +1,6 @@
 package worker
 
 import (
-	"bytes"
 	"errors"
 
 	"github.com/afewell-hh/bounded-agent-workflow/internal/agents/claude"
@@ -57,14 +56,15 @@ func NewReportObservation(result []byte, runID, status, reason string) ([]byte, 
 }
 
 // ValidReportObservation strictly re-reads companion bytes against the exact
-// result bytes of run runID: at most 1024 bytes, one object from its first
-// byte ending in "}\n", exact keys without duplicates, integer 1, the same
-// run ID and task input hash as the result, the result's SHA-256, the literal
-// status not_completed and one of the three reasons. The result must itself
-// be a valid worker_not_completed result. A missing (nil) result, as for an
-// orphan companion, is never valid.
+// result bytes of run runID: at most 1024 bytes holding exactly one JSON
+// object (insignificant JSON whitespace permitted), exact keys without
+// duplicates, integer 1, the same run ID and task input hash as the result,
+// the SHA-256 of the exact result bytes, the literal status not_completed and
+// one of the three reasons. The result must itself be a valid
+// worker_not_completed result. A missing (nil) result, as for an orphan
+// companion, is never valid.
 func ValidReportObservation(data, result []byte, runID string) bool {
-	if len(data) > MaxReportObservation || len(data) < 3 || data[0] != '{' || !bytes.HasSuffix(data, []byte("}\n")) {
+	if len(data) > MaxReportObservation {
 		return false
 	}
 	m, ok := claude.StrictObject(data)

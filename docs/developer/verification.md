@@ -65,6 +65,19 @@ routing/syntax test:
   Deep temporary-directory layouts can exceed that bound; use a registered shallow
   private fixture root without changing the production limit.
 
+The report-observation tests cover all three model-reported noncompletion categories in
+SHA-1 and SHA-256 fixtures and JSON/text delivery, with hand-written companion bytes,
+v1 key sets and text expectations. They reject invalid or duplicate decoded JSON keys,
+wrong types/status/reason, mismatched run/task/exact-result hashes and 1,025-byte inputs;
+1,024 bytes and insignificant JSON whitespace are accepted. The result hash includes
+its exact trailing newline. Completed and unusable attempts, including malformed streams
+and input/instruction/source drift, produce no companion. Cancellation tests distinguish
+the existing usability observation from late cancellation, including at output-limit
+and after publication. Fault controls exercise each actual companion publication seam,
+orphan and delivery failures, retained edits, no replay, and regular-file/symlink
+collisions without replacement. A missing legacy companion does not invalidate v1.
+These controls do not establish that a model-reported category is the actual cause.
+
 These are offline fixtures. They do not establish native Claude authentication, loading
 behaviour or any live result; the single live integration attempt is recorded on the
 implementation ticket, not here.
