@@ -176,8 +176,10 @@ type inputs struct {
 
 // RunWith validates, acquires the exclusive attempt, publishes the supplied
 // inputs, packet, source manifest and intent, runs the native worker once
-// and classifies it. It publishes the result and then delivers its exact
-// output. completed is true only for a delivered worker_completed_unverified
+// and classifies it. It publishes the change manifest, for a usable
+// worker_not_completed attempt the report-observation companion, then the
+// result, and then delivers its exact output; a companion publication failure
+// publishes no result and returns worker_uncertain. completed is true only for a delivered worker_completed_unverified
 // result; a nil error with completed false is a delivered other outcome.
 // A pre-start input change after intent publishes and delivers a not_started
 // result and then returns input_changed. If the state root, namespace or
@@ -250,9 +252,10 @@ func RunWith(ctx context.Context, req Request, stdout io.Writer, d Deps) (comple
 	res.InjectionDisposition, res.ReceiptState, res.CreatedAt = claude.InjectionDisposition, receiptRecorded, createdAt
 
 	var changes []byte
+	var report *nativeReport
 	prestart := in.stateSafe() && in.recheck(d) == nil && d.at("prestart") == nil
 	if prestart {
-		changes = in.launch(ctx, d, &res)
+		changes, report = in.launch(ctx, d, &res)
 	}
 	res.CompletedAt = d.Now().UTC().Format(state.TimeLayout)
 
@@ -267,6 +270,15 @@ func RunWith(ctx context.Context, req Request, stdout io.Writer, d Deps) (comple
 	if len(data) > MaxOutput || len(out) > MaxOutput || d.at("output-limit") != nil {
 		return false, fail(CodeUncertain)
 	}
+	// Only a usable worker_not_completed attempt carries the report pair. Its
+	// companion is bound to the exact JSON result bytes whatever the output
+	// form, and is published before the result.
+	var observation []byte
+	if report != nil && res.Outcome == OutcomeNotCompleted {
+		if observation, err = NewReportObservation(data, req.RunID, report.status, report.reason); err != nil {
+			return false, fail(CodeUncertain)
+		}
+	}
 	// A state root, namespace or attempt that is no longer the retained safe
 	// directory makes publication unsafe: nothing more is published, the
 	// attempt stays blocked and every worktree edit is preserved.
@@ -275,6 +287,11 @@ func RunWith(ctx context.Context, req Request, stdout io.Writer, d Deps) (comple
 	}
 	if changes != nil {
 		if err := st.publish(in.attempt, "changes.json", changes); err != nil {
+			return false, fail(CodeUncertain)
+		}
+	}
+	if observation != nil {
+		if err := st.publish(in.attempt, ReportObservationName, observation); err != nil {
 			return false, fail(CodeUncertain)
 		}
 	}
@@ -558,15 +575,16 @@ func (in *inputs) unchanged(d Deps) bool {
 
 // launch opens the published packet, runs the native worker once and
 // classifies the attempt into res. It returns the change manifest bytes when
-// a bounded capture was completed.
-func (in *inputs) launch(ctx context.Context, d Deps, res *Result) []byte {
+// a bounded capture was completed, and the parser's report pair only for a
+// usable worker_not_completed attempt.
+func (in *inputs) launch(ctx context.Context, d Deps, res *Result) ([]byte, *nativeReport) {
 	pkt, err := openPacket(filepath.Join(in.attempt, "packet.txt"), sum(in.packet))
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	defer pkt.Close()
 	if ctx.Err() != nil || d.at("worker-start") != nil {
-		return nil
+		return nil, nil
 	}
 	exp := claude.Expect{RunID: res.RunID, TaskInputSHA256: in.taskSHA, Worktree: in.top, Plugins: in.profile.Plugins}
 	parser := claude.NewParser(exp)
@@ -578,7 +596,7 @@ func (in *inputs) launch(ctx context.Context, d Deps, res *Result) []byte {
 		obs = proc.Observation{Started: true}
 	}
 	if !obs.Started {
-		return nil
+		return nil, nil
 	}
 	res.Worker = Worker{State: StateUnverified}
 	usable := obs.Usable() && ctx.Err() == nil
@@ -595,31 +613,32 @@ func (in *inputs) launch(ctx context.Context, d Deps, res *Result) []byte {
 		ss.TerminalVerified = perr == nil && summary.TerminalVerified
 	}
 	if !usable || obs.ExitCode != 0 || perr != nil || !res.StreamSummary.TerminalVerified {
-		return nil
+		return nil, nil
 	}
 	// Post-return observations; any drift invalidates the attempt. The state
 	// directories are rechecked by the caller before publication.
 	if d.at("post-observation") != nil || !in.inputsSame() || !in.unchanged(d) {
-		return nil
+		return nil, nil
 	}
 	if h, err := in.g.head(); err != nil || h != in.rec.RepositoryHead {
-		return nil
+		return nil, nil
 	}
 	post, err := takeSnapshot(in.top, in.rec.RepositoryObjectFormat)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	manifest, ok := captureChanges(in.g, res.RunID, in.task.AllowedChanges, in.tree, in.snap, post)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	after, change := in.rec.RepositoryHead, sum(manifest)
 	res.Repository.AfterHead, res.Repository.ChangeManifestSHA256 = &after, &change
-	res.Outcome = OutcomeNotCompleted
 	if summary.Status == claude.StatusCompleted {
 		res.Outcome = OutcomeCompleted
+		return manifest, nil
 	}
-	return manifest
+	res.Outcome = OutcomeNotCompleted
+	return manifest, &nativeReport{summary.Status, summary.Reason}
 }
 
 // openPacket opens the published packet without following links, checks its
