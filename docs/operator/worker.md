@@ -351,6 +351,47 @@ source hashes, authority, readiness and receipt. Output is at most 65,536 bytes.
 | `worker_not_completed` | Usable observations, but the worker truthfully reported noncompletion. Downstream work stops. |
 | `worker_unusable` | Anything else, including not started. |
 
+**Report observation companion.** Only for a `worker_not_completed` result whose
+observations were all usable, the attempt directory also holds
+`report-observation.json`, a private owner-only file of at most 1,024 bytes. It is a
+strict JSON object with exactly six keys: `schema_version` (integer `1`), `run_id`,
+`task_input_sha256` (equal to the result's `input_binding.task_input_sha256`),
+`result_sha256` (SHA-256 of the exact `result.json` bytes, including the trailing
+newline), `status` (`not_completed`) and `reason` (`blocked`, `needs_clarification` or
+`failed`). It holds no paths, prompts, tool data, native IDs, free text or raw events.
+The reason is the category the **model reported**, not a verified cause. The companion
+does not change `result.json`, the JSON or text output, exit codes or error codes, and it
+is written the same way with or without `--json`. Completed and unusable attempts never
+have one, including an attempt whose report parsed but whose stream, process or a later
+check was unusable.
+
+To read it, open it at `worker-v1/<run-id>/report-observation.json` in the state root
+under the same rules as other private inputs: an owner-only `0600` regular file, not a
+symbolic link, with the same bounded read. Trust the reason only when the companion passes
+strict validation and the `result.json` beside it is a valid version 1 result for the same
+run with outcome `worker_not_completed` whose exact bytes hash to `result_sha256`. A
+missing companion (for example, from an attempt recorded before this file existed) means
+the reason is unavailable. It is not a reason to reject an otherwise valid result or to
+supply a default. A missing, invalid, mismatched or orphan companion supplies no trusted
+claim. Consumers that read only `result.json` can ignore the file. The companion grants no
+acceptance, retry, recovery or authority, and `baw` has no command that reads it.
+
+Publication order is `changes.json`, `report-observation.json` (when eligible),
+`result.json`, then output. This is not a transaction. If saving the companion fails, the
+attempt and worktree edits are kept, no result is published, nothing is delivered and the
+command returns `worker_uncertain`. This is the one case where an attempt that would
+otherwise deliver `worker_not_completed` is now uncertain. The native worker is never
+retried. A later result or delivery failure behaves as before and can leave an orphan
+companion, which has no valid meaning without its bound result. Nothing is deleted or
+rolled back, and `.pending-` files remain under the existing storage rules.
+
+Cancellation uses the existing observation taken when the native process returns.
+Cancellation seen there makes the attempt `worker_unusable` with no companion.
+Cancellation after that point does not by itself change the outcome or the companion,
+and later checks still have to pass. Once publication starts, already published files are
+kept. This is an observation cutoff, not a guarantee that the rest of the run was free of
+cancellation.
+
 Errors (`baw: CODE`, exit 1 unless noted): `invalid_usage` (2), `plan_unavailable`,
 `invalid_worker_plan`, `worker_checkpoint_mismatch`, `worker_not_clean`,
 `unsafe_execution_layout`, `instructions_unavailable`, `packet_unavailable`,
