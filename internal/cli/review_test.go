@@ -162,7 +162,11 @@ func TestReviewGlobalUsageDelta(t *testing.T) {
 	verifyLine := "  baw run verify --repo PATH --state-dir DIR --run-id ID --candidate OID --plan FILE [--json]\n"
 	verifyPara := "\nRun verify records one local verifier-program result on an identified candidate;\n" +
 		"it grants no approval, source freeze, complete gate evidence or merge authority.\n"
-	usage := strings.Replace(strings.TrimSuffix(Usage, verifyPara), verifyLine, "", 1)
+	workerLine := "  baw run worker --repo PATH --state-dir DIR --run-id ID --plan FILE [--json]\n"
+	workerPara := "\nRun worker records one native Claude Code worker attempt with full frozen project instructions.\n" +
+		"Its completion is an observation, not tests, review, acceptance or authority; it never retries or recovers.\n"
+	usage := strings.Replace(strings.TrimSuffix(Usage, workerPara), workerLine, "", 1)
+	usage = strings.Replace(strings.TrimSuffix(usage, verifyPara), verifyLine, "", 1)
 	if strings.Count(usage, line) != 1 || !strings.HasSuffix(usage, para) ||
 		!strings.Contains(usage, "[--json]\n"+line+"  baw --help\n") {
 		t.Fatal("review delta missing")

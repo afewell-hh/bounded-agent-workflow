@@ -25,6 +25,7 @@ const Usage = `Usage:
   baw run execute --repo PATH --state-dir DIR --run-id ID --plan FILE [--json]
   baw run review --repo PATH --state-dir DIR --run-id ID --candidate OID --plan FILE [--json]
   baw run verify --repo PATH --state-dir DIR --run-id ID --candidate OID --plan FILE [--json]
+  baw run worker --repo PATH --state-dir DIR --run-id ID --plan FILE [--json]
   baw --help
 
 baw inspect reports read-only Git state counts, fixed maintained-source
@@ -54,6 +55,9 @@ it evaluates no approval and supplies no native agent adapter, verification or m
 
 Run verify records one local verifier-program result on an identified candidate;
 it grants no approval, source freeze, complete gate evidence or merge authority.
+
+Run worker records one native Claude Code worker attempt with full frozen project instructions.
+Its completion is an observation, not tests, review, acceptance or authority; it never retries or recovers.
 `
 
 var checkpointRE = regexp.MustCompile(`^(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$`)
