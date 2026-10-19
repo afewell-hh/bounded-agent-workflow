@@ -152,6 +152,8 @@ Recovery: on `worker_uncertain`, `input_changed` or any outcome other than
 and the worktree (edits are never rolled back; do not reset or clean them) and diagnose.
 A new attempt needs a new run record and the ticket's attempt budget.
 
+Use `baw --help` to find the worker command and `baw run worker --help` for its syntax and support boundary.
+
 ## Reference
 
 ### Syntax
