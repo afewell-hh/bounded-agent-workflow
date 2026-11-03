@@ -9,3 +9,4 @@
 # Convenience only: this does not protect already tracked files or restrict agent access.
 # Preserve only dummy/example content in allowed templates; audit build/artifact exclusions.
 /.secrets/
+/gitignored/
