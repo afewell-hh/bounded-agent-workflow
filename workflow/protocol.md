@@ -58,6 +58,15 @@ replacement, rename or successor ticket does not erase attempts or uncertainties
 work and changes to the governing process remain explicitly supervised; a candidate
 policy never governs its own review, budget or merge.
 
+## Delivery planning and progress
+
+Use [planning and progress discipline](planning.md) and its reusable GitHub plan.
+Before dispatch, tie the bounded ticket to the next real product proof. At closeout
+record actual product progress separately from enabling or fixture evidence. Review
+missed proof checkpoints, repeated blockers and cumulative enabling work before more
+dispatch; successor tickets and finite extensions do not erase stationary progress.
+The lead records the plan review and independent challenge required by that procedure.
+
 ## Durable checkpoint rule
 
 Record accepted decisions before acting on them. Update a compact receipt at scope

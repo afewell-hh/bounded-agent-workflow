@@ -18,6 +18,13 @@ Preserve operator-held previews across your exit; freeze the identified candidat
 final verification and any explicitly required human inspection. Report local versus
 integrated/lab evidence distinctly; ordinary ticket closeout does not wait for a demo click.
 
+Follow the ticket's [plan alignment](../planning.md): identify the product milestone,
+next real proof and effort checkpoint before editing. Exercise the earliest relevant
+real journey within authorized scope. Report a missed checkpoint, recurring blocker
+or forecast overrun promptly with evidence; preserve work and return to the lead.
+Do not expand scaffolding, invent successor work or self-extend to hide a blocked path.
+
+
 Return a readiness receipt or a concrete blocker. Implement only the assigned phase.
 Use the agreed test-driven approach and preserve mandatory regression gates. Keep tests
 that distinguish intended behavior from plausible wrong implementations. Do not weaken

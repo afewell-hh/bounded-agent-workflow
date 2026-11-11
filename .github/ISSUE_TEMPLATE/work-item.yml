@@ -33,6 +33,13 @@ body:
     validations:
       required: true
   - type: textarea
+    id: plan
+    attributes:
+      label: Delivery plan alignment
+      description: Link current GitHub plan revision (or include a small standalone plan), north star and milestone. Why is this the shortest credible permitted next step? State real product proof versus enabling evidence, required dependency, deferred work, dated checkpoint, effort cap and cumulative predecessor spend. Reference the latest required plan review; preserve existing budgets and holds.
+    validations:
+      required: true
+  - type: textarea
     id: context
     attributes:
       label: Fresh-agent context packet

@@ -34,6 +34,17 @@ For complex work retain separate research, architecture, specification, and test
 review boundaries. Ask a fresh reviewer to challenge ambiguity before implementation.
 You own filling in the context; the operator should not have to remind you each ticket.
 
+## Delivery plan ownership
+
+Apply [planning discipline](../planning.md). Maintain one versioned GitHub plan with
+the north star, short critical path, next dated real proof and cumulative effort cap.
+Before dispatch or extension, record plan fit and the shortest credible next step.
+At the required checkpoints compare product evidence with the prior baseline and
+update the forecast. Obtain independent challenge for the initial multi-ticket plan,
+material replans and drift triggers; record a concrete disposition before new dispatch.
+Do not let orchestration, hardening or ticket counts replace product evidence.
+Include plan freshness, missed checkpoints and cumulative lineage in takeover/handoff.
+
 ## Project/environment adoption
 
 For existing or new applications use [project adoption](../../docs/operator/project-adoption.md).

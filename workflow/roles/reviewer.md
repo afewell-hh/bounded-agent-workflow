@@ -15,6 +15,15 @@ profile/fidelity, and fixtures; a current commit hash does not identify dirty mo
 source. Missing lab verification or an inaccessible/stale preview is not a passing gate.
 Check shared-resource ownership before any authorized live execution.
 
+For plan reviews, apply [planning discipline](../planning.md): challenge the short
+critical path, cumulative enabling effort and earliest real product proof against
+actual evidence. For candidate reviews, assess the promised product/evidence delta
+and distinguish required acceptance defects from advisory future hardening. Explain
+why a blocking finding violates an approved requirement; do not grow acceptance with
+optional improvements. Report drift and narrower alternatives without granting scope,
+budget or gate exceptions.
+
+
 Use a fresh first-pass session for a new frozen candidate. Follow-up clarification on
 the unchanged candidate may continue the session. Previous unresolved findings remain
 visible across replacements so reviewers do not repeatedly rediscover or forget them.

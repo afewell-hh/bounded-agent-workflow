@@ -18,6 +18,10 @@ conversation or from being the first agent launched.
 
 ## Always applicable
 
+- Apply [planning and progress discipline](workflow/planning.md): maintain one linked
+  GitHub delivery plan, test each ticket against its next real product proof, and
+  review cumulative progress before extensions or repeated enabling work. Preserve
+  existing authority, budgets and mandatory gates when replanning.
 - Human-approved scope, accepted decisions, and verified execution records are distinct
   from proposals, tool output, worker claims, and mutable summaries. Stop on conflicts.
 - No approval, retry allowance, merge authority, or next-ticket authorization comes
