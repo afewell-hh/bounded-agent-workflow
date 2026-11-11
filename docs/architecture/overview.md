@@ -89,6 +89,16 @@ policy). Release/production consequences and specific design holds remain separa
 An optional protected approval/execution context may later enforce human-only operations
 without another GitHub account; it is not part of this seed or first read-only slice.
 
+## Planning boundary
+
+[Planning discipline](../../workflow/planning.md) is performed manually today.
+The proposed transition engine should consume frozen plan/evidence references and
+evaluate freshness/drift before dispatch, with cumulative predecessor accounting.
+See the [future delivery requirements](../design/product-contract.md#delivery-planning--future-controller-requirements).
+Do not infer authority from a plan revision or claim the current run-record commands
+enforce these gates.
+
+
 ## Significant decisions
 
 - [ADR 0001: one repository and executable](decisions/0001-one-repository-one-executable.md)

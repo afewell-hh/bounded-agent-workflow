@@ -46,6 +46,28 @@ recorded authority chain; missing or unclear delegation fails closed. The tool m
 no per-merge human approval is needed for adopted routine scope. Named design/consequence
 holds stop for the specific decision. Releases/deployment remain separately authorized.
 
+## Delivery planning — future controller requirements
+
+The controller should support the manual [planning discipline](../../workflow/planning.md),
+not optimize for ticket throughput. Snapshot the GitHub plan revision, scope authority,
+milestone, required product proof/fidelity, dated checkpoints, finite cumulative effort
+cap and predecessor lineage with each dispatch. Planning records remain indexed in GitHub;
+immutable run references bind the decision to its evidence.
+
+Before dispatch or extension, evaluate required review freshness and unresolved drift.
+Persist actual product-evidence deltas separately from enabling results, consumed budget,
+missed checkpoints, independent challenge and continue/change/escalate disposition.
+A successor ticket, session replacement or renamed blocker must not reset this accounting.
+A review disposition is not approval or a budget extension; existing authority checks
+remain necessary. Unknown or conflicting plan/evidence state blocks affected dispatch.
+
+Future acceptance scenarios must cover: two enabling-only tickets triggering challenge;
+a missed real-proof date; a renamed successor retaining cumulative spend; necessary
+prerequisites continuing only with a reasoned bounded plan; optional hardening deferred;
+and a material replan preserving holds and requiring its reserved operator decision.
+Verify legitimate in-scope progression needs no repeated human permission.
+These are proposed controller requirements, not implemented command behavior.
+
 ## First-class adoption and environment support
 
 The same bounded operator workflow must support existing and new projects. Existing

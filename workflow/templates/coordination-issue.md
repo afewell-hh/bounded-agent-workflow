@@ -17,6 +17,16 @@ Links to actual approval and decision records:
 
 One paragraph and a link to the accepted product objective/milestone.
 
+## Delivery plan and progress
+
+Current GitHub plan revision / north star / next usable milestone:
+Next real proof and dated checkpoint / forecast:
+Product evidence delta since prior checkpoint (candidate and fidelity):
+Cumulative enabling effort / predecessor lineage / remaining caps:
+Last progress and independent plan reviews / findings / next dated review:
+Missed checkpoints / drift disposition / next permitted action:
+
+
 ## Active work
 
 Issue / approved revision / phase:

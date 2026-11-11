@@ -31,6 +31,11 @@ The intended product combines a lightweight, human-gated development method with
 standalone Go executable. It coordinates subscription-authenticated native Codex and
 Claude Code tools without creating another project-management system.
 
+Use [planning and progress discipline](workflow/planning.md) and the
+[GitHub delivery-plan template](workflow/templates/project-plan.md) to connect bounded
+tickets to observable product outcomes and review drift.
+
+
 ## Start here
 
 Open [START-HERE.md](START-HERE.md), then follow

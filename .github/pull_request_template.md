@@ -10,6 +10,14 @@ Scope approval authorizing routine merge/closeout, or named outstanding operator
 
 What changed, how to try it, expected result, and exact build/environment:
 
+## Delivery progress
+
+GitHub plan revision / milestone / latest required plan review:
+Actual product evidence delta, separately from enabling or fixture results:
+Remaining critical path / cumulative effort / forecast and next real-proof checkpoint:
+Scope drift, missed checkpoints and disposition; advisory hardening deferred:
+
+
 ## Verification
 
 Commands actually run, results, and accessible evidence links:
