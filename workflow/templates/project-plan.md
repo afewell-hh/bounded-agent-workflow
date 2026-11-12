@@ -22,9 +22,14 @@ Missing evidence / failures / uncertainty:
 
 Next bounded ticket / plan revision / scope-authority link:
 Why this is the shortest credible permitted step:
+Observed blocker or user behavior this task advances; evidence that finishes it:
 Optional improvements explicitly deferred:
-Next real-proof checkpoint (date/time) and finite cumulative effort cap:
-Forecast range / assumptions / confidence / date updated:
+Core journey, required regressions and consequential risks to verify now:
+Next real-proof checkpoint (target date/time):
+Rough effort/completion range / assumptions / confidence / date updated:
+Generous watchdog / margin / stalled-work disposition:
+Hard effect, resource, spending and attempt limits / authority for changes:
+Finite ordinary repair allowance / lead delegation / reserved operator decisions:
 
 ## Progress and review
 
@@ -33,8 +38,8 @@ Enabling-only results and why they remain necessary:
 Cumulative effort / attempts / predecessor lineage / remaining caps:
 Unresolved blockers, holds and decisions:
 Last independent challenge / findings / disposition:
-Last progress review / next dated review / review time box:
-Missed proof checkpoints or drift triggers and corrective action:
+Last progress review / next review target:
+Missed targets or drift triggers / task-relevance review / revised forecast or course:
 Decision: continue / change / escalate; next action and owner:
 
 Preserve revision history in linked comments. A revision is not scope approval,
