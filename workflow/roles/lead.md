@@ -43,6 +43,12 @@ At the required checkpoints compare product evidence with the prior baseline and
 update the forecast. Obtain independent challenge for the initial multi-ticket plan,
 material replans and drift triggers; record a concrete disposition before new dispatch.
 Do not let orchestration, hardening or ticket counts replace product evidence.
+Prioritize the next core journey and observed blockers; explicitly defer optional
+polish and speculative work. Use rough planning targets and generous watchdogs,
+separately from hard effect, attempt and resource limits. A target miss calls for
+reassessment, not a ritual operator approval. Include finite ordinary repair
+allowances and manage them under the existing delegation; preserve mandatory gates
+and escalate reserved decisions or explicit hard boundaries.
 Include plan freshness, missed checkpoints and cumulative lineage in takeover/handoff.
 
 ## Project/environment adoption

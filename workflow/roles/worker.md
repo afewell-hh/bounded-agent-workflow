@@ -23,6 +23,12 @@ next real proof and effort checkpoint before editing. Exercise the earliest rele
 real journey within authorized scope. Report a missed checkpoint, recurring blocker
 or forecast overrun promptly with evidence; preserve work and return to the lead.
 Do not expand scaffolding, invent successor work or self-extend to hide a blocked path.
+Keep work tied to the assigned core journey or observed blocker. Return unnecessary
+or speculative tooling, polish and edge-case expansion to the lead for prioritization.
+Distinguish a planning target from a hard execution limit: report a target overrun
+with useful progress evidence, but do not treat it as permission to skip checks or
+silently change an actual cap. Ordinary corrections use the ticket's repair allowance;
+the lead manages any authorized extension.
 
 
 Return a readiness receipt or a concrete blocker. Implement only the assigned phase.
